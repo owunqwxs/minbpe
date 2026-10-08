@@ -40,8 +40,15 @@ class RegexTokenizer(Tokenizer):
         # split the text up into text chunks
         text_chunks = re.findall(self.compiled_pattern, text)
 
-        # input text preprocessing
-        ids = [list(ch.encode("utf-8")) for ch in text_chunks]
+        # input text preprocessing: identical chunks always merge identically, so
+        # keep each distinct chunk once (in first-seen order) with its multiplicity.
+        # Pair counts and their first-seen order are the same as over all chunks,
+        # so max() picks the same pair, ties included.
+        chunk_counts = {}
+        for ch in text_chunks:
+            chunk_counts[ch] = chunk_counts.get(ch, 0) + 1
+        ids = [list(ch.encode("utf-8")) for ch in chunk_counts]
+        weights = list(chunk_counts.values())
 
         # iteratively merge the most common pairs to create new tokens
         merges = {} # (int, int) -> int
@@ -49,9 +56,9 @@ class RegexTokenizer(Tokenizer):
         for i in range(num_merges):
             # count the number of times every consecutive pair appears
             stats = {}
-            for chunk_ids in ids:
-                # passing in stats will update it in place, adding up counts
-                get_stats(chunk_ids, stats)
+            for chunk_ids, w in zip(ids, weights):
+                for p in zip(chunk_ids, chunk_ids[1:]):
+                    stats[p] = stats.get(p, 0) + w
             # find the pair with the highest count
             pair = max(stats, key=stats.get)
             # mint a new token: assign it the next available id
