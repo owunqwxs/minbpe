@@ -121,9 +121,14 @@ class RegexTokenizer(Tokenizer):
         text_chunks = re.findall(self.compiled_pattern, text)
         # all chunks of text are encoded separately, then results are joined
         ids = []
+        # chunks repeat a lot in natural text (" the", ","): encode each distinct
+        # chunk once per call
+        cache = {}
         for chunk in text_chunks:
-            chunk_bytes = chunk.encode("utf-8") # raw bytes
-            chunk_ids = self._encode_chunk(chunk_bytes)
+            chunk_ids = cache.get(chunk)
+            if chunk_ids is None:
+                chunk_bytes = chunk.encode("utf-8") # raw bytes
+                chunk_ids = cache[chunk] = self._encode_chunk(chunk_bytes)
             ids.extend(chunk_ids)
         return ids
 
