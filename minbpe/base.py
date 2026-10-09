@@ -7,6 +7,14 @@ some concessions are made for simplicity.
 """
 import unicodedata
 
+try:
+    from _collections import _count_elements
+except ImportError: # pragma: no cover - pure python fallback
+    def _count_elements(mapping, iterable):
+        mapping_get = mapping.get
+        for elem in iterable:
+            mapping[elem] = mapping_get(elem, 0) + 1
+
 # -----------------------------------------------------------------------------
 # a few helper functions useful for both BasicTokenizer and RegexTokenizer
 
@@ -17,8 +25,9 @@ def get_stats(ids, counts=None):
     Optionally allows to update an existing dictionary of counts
     """
     counts = {} if counts is None else counts
-    for pair in zip(ids, ids[1:]): # iterate consecutive elements
-        counts[pair] = counts.get(pair, 0) + 1
+    # iterate consecutive elements; _count_elements does
+    # counts[pair] = counts.get(pair, 0) + 1 for each pair, in C
+    _count_elements(counts, zip(ids, ids[1:]))
     return counts
 
 
