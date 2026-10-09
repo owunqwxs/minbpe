@@ -82,15 +82,27 @@ def apply_merges(ids, merges):
     merges_get = merges.get
     inf = float("inf")
     ranks = list(map(merges_get, zip(ids, ids[1:]), repeat(inf)))
+    ids = list(ids) # private copy: the single-occurrence path edits it in place
     while ranks:
         idx = min(ranks)
         if idx == inf:
             break # nothing else can be merged anymore
         j = ranks.index(idx)
-        p0 = ids[j]
-        p1 = ids[j+1]
         # positions with rank idx left to visit (all pair occurrences are among them)
         k = ranks.count(idx)
+        if k == 1:
+            # the common case: a single occurrence, splice it in place and
+            # recompute only the (at most two) neighbouring ranks
+            ids[j] = idx
+            del ids[j+1]
+            del ranks[j]
+            if j:
+                ranks[j-1] = merges_get((ids[j-1], idx), inf)
+            if j < len(ranks):
+                ranks[j] = merges_get((idx, ids[j+1]), inf)
+            continue
+        p0 = ids[j]
+        p1 = ids[j+1]
         last = len(ranks) - 1 # last pair position
         newids = []
         ext = newids.extend
