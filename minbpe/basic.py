@@ -120,4 +120,6 @@ class BasicTokenizer(Tokenizer):
         text_bytes = text.encode("utf-8") # raw bytes
         ids = list(text_bytes) # list of integers in range 0..255
         # repeatedly merge the pair with the lowest merge index
-        return apply_merges(ids, self.merges)
+        # (int "no merge" sentinel above every merge index: cheap int compares)
+        merges = self.merges
+        return apply_merges(ids, merges, max(merges.values(), default=0) + 1)

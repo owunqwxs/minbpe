@@ -67,7 +67,7 @@ def merge(ids, pair, idx):
     extend(ids[i:])
     return newids
 
-def apply_merges(ids, merges):
+def apply_merges(ids, merges, inf=None):
     """
     Repeatedly merge the pair with the lowest merge index until none applies.
     Same result as min() over get_stats(ids) keyed by merges.get(p, inf): the
@@ -76,11 +76,15 @@ def apply_merges(ids, merges):
     The rank list is computed once and then patched locally around each merged
     occurrence (only the pairs touching a merged token change), instead of
     being recomputed over the whole sequence after every merge.
+    inf: optional "no merge" rank, must be greater than every value in merges
+    (an int sentinel keeps all rank comparisons int-int, which are much
+    cheaper than int-float ones); defaults to float("inf").
     """
     if len(ids) < 2:
         return ids
     merges_get = merges.get
-    inf = float("inf")
+    if inf is None:
+        inf = float("inf")
     ranks = list(map(merges_get, zip(ids, ids[1:]), repeat(inf)))
     ids = list(ids) # private copy: the single-occurrence path edits it in place
     while ranks:
