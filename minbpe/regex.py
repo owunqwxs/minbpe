@@ -10,7 +10,7 @@ Unlike BasicTokenizer:
 """
 
 import regex as re
-from .base import Tokenizer, get_stats, merge
+from .base import Tokenizer, get_stats, merge, _count_elements
 
 
 # the main GPT text split patterns, see
@@ -56,15 +56,23 @@ class RegexTokenizer(Tokenizer):
         for i in range(num_merges):
             # count the number of times every consecutive pair appears
             stats = {}
+            stats_get = stats.get
             for chunk_ids, w in zip(ids, weights):
-                for p in zip(chunk_ids, chunk_ids[1:]):
-                    stats[p] = stats.get(p, 0) + w
+                if w == 1:
+                    # same insertion order and counts as the loop below, in C
+                    _count_elements(stats, zip(chunk_ids, chunk_ids[1:]))
+                else:
+                    for p in zip(chunk_ids, chunk_ids[1:]):
+                        stats[p] = stats_get(p, 0) + w
             # find the pair with the highest count
-            pair = max(stats, key=stats.get)
+            pair = max(stats, key=stats_get)
             # mint a new token: assign it the next available id
             idx = 256 + i
-            # replace all occurrences of pair in ids with idx
-            ids = [merge(chunk_ids, pair, idx) for chunk_ids in ids]
+            # replace all occurrences of pair in ids with idx (chunks without
+            # pair[0] are unchanged and never mutated, so they can be reused)
+            p0 = pair[0]
+            ids = [merge(chunk_ids, pair, idx) if p0 in chunk_ids else chunk_ids
+                   for chunk_ids in ids]
             # save the merge
             merges[pair] = idx
             vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
@@ -100,10 +108,13 @@ class RegexTokenizer(Tokenizer):
         # return the token ids
         # let's begin. first, convert all bytes to integers in range 0..255
         ids = list(text_bytes)
+        merges_get = self.merges.get
+        inf = float("inf")
+        key = lambda p: merges_get(p, inf)
         while len(ids) >= 2:
             # find the pair with the lowest merge index
             stats = get_stats(ids)
-            pair = min(stats, key=lambda p: self.merges.get(p, float("inf")))
+            pair = min(stats, key=key)
             # subtle: if there are no more merges available, the key will
             # result in an inf for every single pair, and the min will be
             # just the first pair in the list, arbitrarily

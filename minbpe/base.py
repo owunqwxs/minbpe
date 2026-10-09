@@ -37,16 +37,33 @@ def merge(ids, pair, idx):
     of pair with the new integer token idx
     Example: ids=[1, 2, 3, 1, 2], pair=(1, 2), idx=4 -> [4, 3, 4]
     """
+    p0, p1 = pair
+    # jump between occurrences of pair[0] with list.index (in C) and copy the
+    # untouched runs in between with slices; k = occurrences of p0 left at >= i
+    k = ids.count(p0)
+    if not k:
+        return list(ids)
     newids = []
+    extend = newids.extend
+    append = newids.append
+    index = ids.index
+    last = len(ids) - 1
+    same = p0 == p1
     i = 0
-    while i < len(ids):
+    while k:
+        j = index(p0, i)
+        k -= 1
         # if not at the very last position AND the pair matches, replace it
-        if ids[i] == pair[0] and i < len(ids) - 1 and ids[i+1] == pair[1]:
-            newids.append(idx)
-            i += 2
+        if j < last and ids[j+1] == p1:
+            extend(ids[i:j])
+            append(idx)
+            i = j + 2
+            if same:
+                k -= 1 # ids[j+1] was an occurrence of p0 too
         else:
-            newids.append(ids[i])
-            i += 1
+            extend(ids[i:j+1])
+            i = j + 1
+    extend(ids[i:])
     return newids
 
 # first two helper functions...
