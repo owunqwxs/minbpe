@@ -73,16 +73,63 @@ def apply_merges(ids, merges):
     Same result as min() over get_stats(ids) keyed by merges.get(p, inf): the
     rank list is in position order, so .index() finds the first-seen pair
     among the minimal ones, and the minimal rank is the merged token itself.
+    The rank list is computed once and then patched locally around each merged
+    occurrence (only the pairs touching a merged token change), instead of
+    being recomputed over the whole sequence after every merge.
     """
+    if len(ids) < 2:
+        return ids
     merges_get = merges.get
     inf = float("inf")
-    while len(ids) >= 2:
-        ranks = list(map(merges_get, zip(ids, ids[1:]), repeat(inf)))
+    ranks = list(map(merges_get, zip(ids, ids[1:]), repeat(inf)))
+    while ranks:
         idx = min(ranks)
         if idx == inf:
             break # nothing else can be merged anymore
         j = ranks.index(idx)
-        ids = merge(ids, (ids[j], ids[j+1]), idx)
+        p0 = ids[j]
+        p1 = ids[j+1]
+        # positions with rank idx left to visit (all pair occurrences are among them)
+        k = ranks.count(idx)
+        last = len(ranks) - 1 # last pair position
+        newids = []
+        ext = newids.extend
+        app = newids.append
+        newranks = []
+        rext = newranks.extend
+        rapp = newranks.append
+        index = ranks.index
+        s = 0 # start of the not yet copied part of ids / ranks
+        first = True
+        while True:
+            k -= 1
+            if ids[j] == p0 and ids[j+1] == p1:
+                # merge the occurrence at j (same left-to-right order as merge())
+                if s < j:
+                    if not first:
+                        rapp(merges_get((idx, ids[s]), inf))
+                    rext(ranks[s:j-1])
+                    rapp(merges_get((ids[j-1], idx), inf))
+                    ext(ids[s:j])
+                elif not first:
+                    rapp(merges_get((idx, idx), inf))
+                app(idx)
+                first = False
+                s = j + 2
+                if j < last and ranks[j+1] == idx:
+                    k -= 1 # overlapping position j+1 is skipped
+                start = s
+            else:
+                start = j + 1
+            if not k:
+                break
+            j = index(idx, start)
+        if s <= last + 1:
+            rapp(merges_get((idx, ids[s]), inf))
+            rext(ranks[s:])
+            ext(ids[s:])
+        ids = newids
+        ranks = newranks
     return ids
 
 # first two helper functions...
