@@ -9,6 +9,8 @@ Unlike BasicTokenizer:
 - RegexTokenizer handles optional special tokens.
 """
 
+from itertools import compress
+
 import regex as re
 from .base import Tokenizer, get_stats, merge, _count_elements
 
@@ -50,35 +52,71 @@ class RegexTokenizer(Tokenizer):
         ids = [list(ch.encode("utf-8")) for ch in chunk_counts]
         weights = list(chunk_counts.values())
 
+        # count the number of times every consecutive pair appears (once);
+        # afterwards the counts are updated incrementally for changed chunks only
+        stats = {}
+        stats_get = stats.get
+        for chunk_ids, w in zip(ids, weights):
+            if w == 1:
+                _count_elements(stats, zip(chunk_ids, chunk_ids[1:]))
+            else:
+                for p in zip(chunk_ids, chunk_ids[1:]):
+                    stats[p] = stats_get(p, 0) + w
+        stats_values = stats.values()
+        # where[t]: indices of chunks that contain (or once contained) token t
+        where = [set() for _ in range(max(vocab_size, 256))]
+        for k, chunk_ids in enumerate(ids):
+            for t in set(chunk_ids):
+                where[t].add(k)
+
         # iteratively merge the most common pairs to create new tokens
         merges = {} # (int, int) -> int
         vocab = {idx: bytes([idx]) for idx in range(256)} # idx -> bytes
         for i in range(num_merges):
-            # count the number of times every consecutive pair appears
-            stats = {}
-            stats_get = stats.get
-            for chunk_ids, w in zip(ids, weights):
-                if w == 1:
-                    # same insertion order and counts as the loop below, in C
-                    _count_elements(stats, zip(chunk_ids, chunk_ids[1:]))
-                else:
-                    for p in zip(chunk_ids, chunk_ids[1:]):
-                        stats[p] = stats_get(p, 0) + w
-            # find the pair with the highest count
+            # find the pair with the highest count; ties go to the pair whose
+            # first occurrence (chunk order, then position) is earliest, which
+            # is what max() over a freshly recounted dict would pick
             pair = max(stats, key=stats_get)
+            top = stats[pair]
+            if list(stats_values).count(top) > 1:
+                cands = set(compress(stats, map(top.__eq__, stats_values)))
+                for chunk_ids in ids:
+                    if not cands.isdisjoint(zip(chunk_ids, chunk_ids[1:])):
+                        for p in zip(chunk_ids, chunk_ids[1:]):
+                            if p in cands:
+                                pair = p
+                                break
+                        break
+                top = stats[pair]
             # mint a new token: assign it the next available id
             idx = 256 + i
-            # replace all occurrences of pair in ids with idx (chunks without
-            # pair[0] are unchanged and never mutated, so they can be reused)
-            p0 = pair[0]
-            ids = [merge(chunk_ids, pair, idx) if p0 in chunk_ids else chunk_ids
-                   for chunk_ids in ids]
+            # replace all occurrences of pair in the chunks that hold both
+            # tokens, updating pair counts by the difference
+            p0, p1 = pair
+            touched = []
+            where_idx = where[idx]
+            for k in where[p0] & where[p1]:
+                old = ids[k]
+                new = merge(old, pair, idx)
+                if len(new) == len(old):
+                    continue
+                ids[k] = new
+                w = weights[k]
+                for p in zip(old, old[1:]):
+                    stats[p] -= w
+                    touched.append(p)
+                for p in zip(new, new[1:]):
+                    stats[p] = stats_get(p, 0) + w
+                where_idx.add(k)
+            for p in touched:
+                if stats_get(p) == 0:
+                    del stats[p]
             # save the merge
             merges[pair] = idx
             vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
             # prints
             if verbose:
-                print(f"merge {i+1}/{num_merges}: {pair} -> {idx} ({vocab[idx]}) had {stats[pair]} occurrences")
+                print(f"merge {i+1}/{num_merges}: {pair} -> {idx} ({vocab[idx]}) had {top} occurrences")
 
         # save class variables
         self.merges = merges # used in encode()
