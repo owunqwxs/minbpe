@@ -12,7 +12,7 @@ Unlike BasicTokenizer:
 from itertools import compress
 
 import regex as re
-from .base import Tokenizer, get_stats, merge, _count_elements
+from .base import Tokenizer, merge, apply_merges, _count_elements
 
 
 # the main GPT text split patterns, see
@@ -145,24 +145,8 @@ class RegexTokenizer(Tokenizer):
     def _encode_chunk(self, text_bytes):
         # return the token ids
         # let's begin. first, convert all bytes to integers in range 0..255
-        ids = list(text_bytes)
-        merges_get = self.merges.get
-        inf = float("inf")
-        key = lambda p: merges_get(p, inf)
-        while len(ids) >= 2:
-            # find the pair with the lowest merge index
-            stats = get_stats(ids)
-            pair = min(stats, key=key)
-            # subtle: if there are no more merges available, the key will
-            # result in an inf for every single pair, and the min will be
-            # just the first pair in the list, arbitrarily
-            # we can detect this terminating case by a membership check
-            if pair not in self.merges:
-                break # nothing else can be merged anymore
-            # otherwise let's merge the best pair (lowest merge index)
-            idx = self.merges[pair]
-            ids = merge(ids, pair, idx)
-        return ids
+        # then repeatedly merge the pair with the lowest merge index
+        return apply_merges(list(text_bytes), self.merges)
 
     def encode_ordinary(self, text):
         """Encoding that ignores any special tokens."""

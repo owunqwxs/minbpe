@@ -6,6 +6,7 @@ e.g. isolating all regex/pattern parts to the RegexTokenizer, but
 some concessions are made for simplicity.
 """
 import unicodedata
+from itertools import repeat
 
 try:
     from _collections import _count_elements
@@ -65,6 +66,24 @@ def merge(ids, pair, idx):
             i = j + 1
     extend(ids[i:])
     return newids
+
+def apply_merges(ids, merges):
+    """
+    Repeatedly merge the pair with the lowest merge index until none applies.
+    Same result as min() over get_stats(ids) keyed by merges.get(p, inf): the
+    rank list is in position order, so .index() finds the first-seen pair
+    among the minimal ones, and the minimal rank is the merged token itself.
+    """
+    merges_get = merges.get
+    inf = float("inf")
+    while len(ids) >= 2:
+        ranks = list(map(merges_get, zip(ids, ids[1:]), repeat(inf)))
+        idx = min(ranks)
+        if idx == inf:
+            break # nothing else can be merged anymore
+        j = ranks.index(idx)
+        ids = merge(ids, (ids[j], ids[j+1]), idx)
+    return ids
 
 # first two helper functions...
 def replace_control_characters(s: str) -> str:
