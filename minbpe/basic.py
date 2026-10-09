@@ -9,6 +9,8 @@ But:
 - Does not handle any special tokens.
 """
 
+from itertools import compress, islice
+
 from .base import Tokenizer, get_stats, merge, apply_merges
 
 
@@ -78,10 +80,14 @@ class BasicTokenizer(Tokenizer):
             # find the pair with the highest count; ties go to the pair whose
             # first occurrence in ids is earliest, which is what max() over a
             # freshly recounted dict (insertion = first-seen order) would pick
-            pair = max(stats, key=stats_get)
-            top = stats[pair]
-            if list(stats_values).count(top) > 1:
-                cands = {p for p, c in stats.items() if c == top}
+            # (max/count/index over a plain list of counts run in C without a
+            # per-pair key call; the first maximal key is the max() result)
+            vals = list(stats_values)
+            top = max(vals)
+            if vals.count(top) == 1:
+                pair = next(islice(stats, vals.index(top), None))
+            else:
+                cands = set(compress(stats, map(top.__eq__, vals)))
                 for p in zip(ids, ids[1:]):
                     if p in cands:
                         pair = p

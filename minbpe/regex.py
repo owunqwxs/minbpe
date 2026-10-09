@@ -9,7 +9,7 @@ Unlike BasicTokenizer:
 - RegexTokenizer handles optional special tokens.
 """
 
-from itertools import compress
+from itertools import compress, islice
 
 import regex as re
 from .base import Tokenizer, merge, apply_merges, _count_elements
@@ -76,10 +76,14 @@ class RegexTokenizer(Tokenizer):
             # find the pair with the highest count; ties go to the pair whose
             # first occurrence (chunk order, then position) is earliest, which
             # is what max() over a freshly recounted dict would pick
-            pair = max(stats, key=stats_get)
-            top = stats[pair]
-            if list(stats_values).count(top) > 1:
-                cands = set(compress(stats, map(top.__eq__, stats_values)))
+            # (max/count/index over a plain list of counts run in C without a
+            # per-pair key call; the first maximal key is the max() result)
+            vals = list(stats_values)
+            top = max(vals)
+            if vals.count(top) == 1:
+                pair = next(islice(stats, vals.index(top), None))
+            else:
+                cands = set(compress(stats, map(top.__eq__, vals)))
                 for chunk_ids in ids:
                     if not cands.isdisjoint(zip(chunk_ids, chunk_ids[1:])):
                         for p in zip(chunk_ids, chunk_ids[1:]):
