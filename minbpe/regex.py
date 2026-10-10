@@ -115,6 +115,36 @@ class RegexTokenizer(Tokenizer):
             # a merged pair never reappears, so its chunk set can be dropped
             for k in where.pop(pair, ()):
                 old = ids[k]
+                c = old.count(p0)
+                if c < 2:
+                    # fast path (most chunks): at most one occurrence of p0,
+                    # so at most one merge; same stats updates, same order
+                    if not c:
+                        continue # stale entry
+                    j = old.index(p0)
+                    n_old = len(old)
+                    if j + 1 == n_old or old[j+1] != p1:
+                        continue # stale entry
+                    ids[k] = old[:j] + [idx] + old[j+2:]
+                    w = weights[k]
+                    stats[pair] -= w
+                    if j:
+                        a = old[j-1]
+                        p = (a, p0)
+                        stats[p] -= w
+                        rapp(p)
+                        p = (a, idx)
+                        stats[p] = stats_get(p, 0) + w
+                        where[p].add(k)
+                    if j + 2 < n_old:
+                        b = old[j+2]
+                        p = (p1, b)
+                        stats[p] -= w
+                        rapp(p)
+                        p = (idx, b)
+                        stats[p] = stats_get(p, 0) + w
+                        where[p].add(k)
+                    continue
                 new = merge(old, pair, idx)
                 n_old = len(old)
                 m = n_old - len(new) # number of merged occurrences
