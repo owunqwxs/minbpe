@@ -100,21 +100,44 @@ class RegexTokenizer(Tokenizer):
             # replace all occurrences of pair in the chunks that hold both
             # tokens, updating pair counts by the difference
             p0, p1 = pair
-            touched = []
+            touched = [pair]
+            rapp = touched.append
             # a merged pair never reappears, so its chunk set can be dropped
             for k in where.pop(pair, ()):
                 old = ids[k]
                 new = merge(old, pair, idx)
-                if len(new) == len(old):
+                n_old = len(old)
+                m = n_old - len(new) # number of merged occurrences
+                if not m:
                     continue
                 ids[k] = new
                 w = weights[k]
-                for p in zip(old, old[1:]):
-                    stats[p] -= w
-                    touched.append(p)
-                for p in zip(new, new[1:]):
-                    stats[p] = stats_get(p, 0) + w
-                    where[p].add(k)
+                stats[pair] -= w * m
+                # only the pairs touching a merged occurrence change (idx does
+                # not occur in old, so new[q] == idx marks exactly the merges)
+                index = new.index
+                q = -1
+                for c in range(m):
+                    q = index(idx, q + 1)
+                    j = q + c # position of this occurrence in old
+                    if q:
+                        a = new[q-1]
+                        if a != idx:
+                            # (an adjacent previous occurrence already
+                            # accounted for the pair between them)
+                            p = (a, p0)
+                            stats[p] -= w
+                            rapp(p)
+                            p = (a, idx)
+                            stats[p] = stats_get(p, 0) + w
+                            where[p].add(k)
+                    if j + 2 < n_old:
+                        p = (p1, old[j+2])
+                        stats[p] -= w
+                        rapp(p)
+                        p = (idx, new[q+1])
+                        stats[p] = stats_get(p, 0) + w
+                        where[p].add(k)
             for p in touched:
                 if stats_get(p) == 0:
                     del stats[p]
