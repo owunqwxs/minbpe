@@ -83,6 +83,15 @@ class BasicTokenizer(Tokenizer):
         # lazy max-heap of counts: no full scan of stats per merge
         heap = [(-c, p) for p, c in stats.items()]
         heapify(heap)
+        if vocab_size <= 0x110000:
+            # every token id fits in one code point: keep ids as a str so that
+            # pair search and merging run in C (str.find / str.replace do the
+            # same left-to-right, non-overlapping matching as merge())
+            self._train_str(text_bytes.decode("latin-1"), num_merges, stats,
+                            heap, merges, vocab, verbose)
+            self.merges = merges
+            self.vocab = vocab
+            return
         for i in range(num_merges):
             # find the pair with the highest count; ties go to the pair whose
             # first occurrence in ids is earliest, which is what max() over a
@@ -113,6 +122,74 @@ class BasicTokenizer(Tokenizer):
         # save class variables
         self.merges = merges # used in encode()
         self.vocab = vocab   # used in decode()
+
+    @staticmethod
+    def _train_str(s, num_merges, stats, heap, merges, vocab, verbose):
+        # s: the current ids as a str of code points chr(id)
+        stats_get = stats.get
+        for i in range(num_merges):
+            top, cands = pop_top_pairs(heap, stats_get, heappush, heappop)
+            if len(cands) == 1:
+                pair = cands[0]
+            else:
+                # tie: the pair whose first occurrence is earliest
+                best = -1
+                for p in cands:
+                    j = s.find(chr(p[0]) + chr(p[1]))
+                    if best < 0 or j < best:
+                        best = j
+                        pair = p
+            idx = 256 + i
+            p0, p1 = pair
+            ps = chr(p0) + chr(p1)
+            # occurrences merged by merge(): left to right, non-overlapping
+            find = s.find
+            pos = []
+            pos_app = pos.append
+            j = find(ps)
+            while j >= 0:
+                pos_app(j)
+                j = find(ps, j + 2)
+            # update the counts exactly like _update_stats
+            n = len(s)
+            k = len(pos)
+            removed = [pair]
+            rapp = removed.append
+            added = set()
+            aadd = added.add
+            prev_end = -1
+            for m in range(k):
+                j = pos[m]
+                if j and j != prev_end:
+                    a = ord(s[j-1])
+                    p = (a, p0)
+                    stats[p] -= 1
+                    rapp(p)
+                    p = (a, idx)
+                    stats[p] = stats_get(p, 0) + 1
+                    aadd(p)
+                if j + 2 < n:
+                    b = ord(s[j+2])
+                    p = (p1, b)
+                    stats[p] -= 1
+                    rapp(p)
+                    if m + 1 < k and pos[m+1] == j + 2:
+                        b = idx
+                    p = (idx, b)
+                    stats[p] = stats_get(p, 0) + 1
+                    aadd(p)
+                prev_end = j + 2
+            stats[pair] -= k
+            for p in removed:
+                if stats_get(p) == 0:
+                    del stats[p]
+            for p in added:
+                heappush(heap, (-stats[p], p))
+            s = s.replace(ps, chr(idx))
+            merges[pair] = idx
+            vocab[idx] = vocab[p0] + vocab[p1]
+            if verbose:
+                print(f"merge {i+1}/{num_merges}: {pair} -> {idx} ({vocab[idx]}) had {top} occurrences")
 
     def decode(self, ids):
         # given ids (list of integers), return Python string
