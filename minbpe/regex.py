@@ -10,7 +10,7 @@ Unlike BasicTokenizer:
 """
 
 from collections import defaultdict
-from itertools import compress, islice
+from heapq import heapify, heappop, heappush
 
 import regex as re
 from .base import Tokenizer, merge, apply_merges, _count_elements
@@ -63,6 +63,10 @@ class RegexTokenizer(Tokenizer):
                 for p in zip(chunk_ids, chunk_ids[1:]):
                     stats[p] = stats_get(p, 0) + w
         stats_values = stats.values()
+        # lazy max-heap of (-count, pair): an entry is valid while it matches
+        # the current count; every pair whose count changes is pushed again
+        heap = [(-c, p) for p, c in stats.items()]
+        heapify(heap)
         # where[p]: indices of chunks that contain (or once contained) pair p;
         # only those chunks can hold an occurrence of p when it gets merged
         # (chunk visiting order does not matter: chunks merge independently)
@@ -78,19 +82,33 @@ class RegexTokenizer(Tokenizer):
             # find the pair with the highest count; ties go to the pair whose
             # first occurrence (chunk order, then position) is earliest, which
             # is what max() over a freshly recounted dict would pick
-            # (max/count/index over a plain list of counts run in C without a
-            # per-pair key call; the first maximal key is the max() result)
-            vals = list(stats_values)
-            top = max(vals)
-            if vals.count(top) == 1:
-                pair = next(islice(stats, vals.index(top), None))
+            # (the tie-break does not depend on dict order, so the top pairs
+            # come from the heap: drop stale entries, then pop all valid ties)
+            while heap:
+                c, pair = heap[0]
+                if stats_get(pair) == -c:
+                    break
+                heappop(heap)
             else:
+                max(stats_values) # empty stats: same error as before
+            top = -c
+            heappop(heap)
+            tied = None
+            while heap and heap[0][0] == c:
+                q = heappop(heap)[1]
+                if stats_get(q) == top:
+                    if tied is None:
+                        tied = {pair}
+                    tied.add(q)
+            if tied is not None and len(tied) > 1:
+                for q in tied:
+                    heappush(heap, (c, q))
                 # earliest occurrence (chunk, position) among the tied pairs:
                 # where[p] holds every chunk that contains p (plus stale ones),
                 # so visit those in chunk order and stop once past the best
                 best_k = len(ids)
                 best_j = 0
-                for p in compress(stats, map(top.__eq__, vals)):
+                for p in tied:
                     for k in sorted(where[p]):
                         if k > best_k:
                             break
@@ -136,6 +154,7 @@ class RegexTokenizer(Tokenizer):
                         p = (a, idx)
                         stats[p] = stats_get(p, 0) + w
                         where[p].add(k)
+                        rapp(p)
                     if j + 2 < n_old:
                         b = old[j+2]
                         p = (p1, b)
@@ -144,6 +163,7 @@ class RegexTokenizer(Tokenizer):
                         p = (idx, b)
                         stats[p] = stats_get(p, 0) + w
                         where[p].add(k)
+                        rapp(p)
                     continue
                 new = merge(old, pair, idx)
                 n_old = len(old)
@@ -171,6 +191,7 @@ class RegexTokenizer(Tokenizer):
                             p = (a, idx)
                             stats[p] = stats_get(p, 0) + w
                             where[p].add(k)
+                            rapp(p)
                     if j + 2 < n_old:
                         p = (p1, old[j+2])
                         stats[p] -= w
@@ -178,8 +199,12 @@ class RegexTokenizer(Tokenizer):
                         p = (idx, new[q+1])
                         stats[p] = stats_get(p, 0) + w
                         where[p].add(k)
-            for p in touched:
-                if stats_get(p) == 0:
+                        rapp(p)
+            for p in set(touched):
+                c = stats_get(p)
+                if c:
+                    heappush(heap, (-c, p))
+                elif c == 0:
                     del stats[p]
             # save the merge
             merges[pair] = idx
