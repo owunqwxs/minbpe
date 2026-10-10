@@ -48,8 +48,7 @@ class RegexTokenizer(Tokenizer):
         # Pair counts and their first-seen order are the same as over all chunks,
         # so max() picks the same pair, ties included.
         chunk_counts = {}
-        for ch in text_chunks:
-            chunk_counts[ch] = chunk_counts.get(ch, 0) + 1
+        _count_elements(chunk_counts, text_chunks)
         ids = [list(ch.encode("utf-8")) for ch in chunk_counts]
         weights = list(chunk_counts.values())
 
@@ -86,15 +85,26 @@ class RegexTokenizer(Tokenizer):
             if vals.count(top) == 1:
                 pair = next(islice(stats, vals.index(top), None))
             else:
-                cands = set(compress(stats, map(top.__eq__, vals)))
-                for chunk_ids in ids:
-                    if not cands.isdisjoint(zip(chunk_ids, chunk_ids[1:])):
-                        for p in zip(chunk_ids, chunk_ids[1:]):
-                            if p in cands:
-                                pair = p
+                # earliest occurrence (chunk, position) among the tied pairs:
+                # where[p] holds every chunk that contains p (plus stale ones),
+                # so visit those in chunk order and stop once past the best
+                best_k = len(ids)
+                best_j = 0
+                for p in compress(stats, map(top.__eq__, vals)):
+                    for k in sorted(where[p]):
+                        if k > best_k:
+                            break
+                        chunk_ids = ids[k]
+                        for j, q in enumerate(zip(chunk_ids, chunk_ids[1:])):
+                            if q == p:
                                 break
+                        else:
+                            continue # stale entry: p no longer in chunk k
+                        if k < best_k or j < best_j:
+                            best_k = k
+                            best_j = j
+                            pair = p
                         break
-                top = stats[pair]
             # mint a new token: assign it the next available id
             idx = 256 + i
             # replace all occurrences of pair in the chunks that hold both
