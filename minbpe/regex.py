@@ -13,7 +13,23 @@ from collections import defaultdict
 from heapq import heapify, heappop, heappush
 
 import regex as re
+from itertools import chain
 from .base import Tokenizer, merge, apply_merges, _count_elements
+from .basic import _replace_table
+
+
+def _chunk_table(merges):
+    # basic._replace_table, or None if the 0xff chunk separator could clash
+    # with a merge (as a pair token or as a minted token)
+    if not merges:
+        return None
+    table = _replace_table(merges)
+    if table is None:
+        return None
+    for ps, c in table:
+        if "\xff" in ps or c == "\xff":
+            return None
+    return table
 
 
 # the main GPT text split patterns, see
@@ -271,7 +287,8 @@ class RegexTokenizer(Tokenizer):
         merges = self.merges
         state = self.__dict__.get("_enc_state")
         if state is None or state[0] is not merges or state[1] != len(merges):
-            state = (merges, len(merges), self._no_merge_rank(), {})
+            state = (merges, len(merges), self._no_merge_rank(), {},
+                     _chunk_table(merges))
             self._enc_state = state
         cache = state[3]
         if len(cache) > self._CHUNK_CACHE_MAX:
@@ -281,6 +298,25 @@ class RegexTokenizer(Tokenizer):
     def _encode_ordinary(self, text, cache, inf):
         # split text into chunks of text by categories defined in regex pattern
         text_chunks = re.findall(self.compiled_pattern, text)
+        table = self._enc_state[4]
+        if table is not None:
+            new = set(text_chunks).difference(cache)
+            if len(new) >= 16:
+                # encode all new chunks at once, every merge done in C: the
+                # chunks are joined with byte 0xff (never produced by UTF-8 and
+                # in no merge pair, so no merge crosses a chunk boundary), then
+                # each merge is replaced in increasing idx order (same result
+                # as apply_merges per chunk, see basic._replace_table)
+                new = list(new)
+                s = b"\xff".join(map(str.encode, new)).decode("latin-1")
+                for ps, c in table:
+                    s = s.replace(ps, c)
+                cache.update(zip(new, [list(map(ord, p)) for p in s.split("\xff")]))
+            elif new:
+                encode_chunk = self._encode_chunk
+                for chunk in new:
+                    cache[chunk] = encode_chunk(chunk.encode("utf-8"), inf)
+            return list(chain.from_iterable(map(cache.__getitem__, text_chunks)))
         # all chunks of text are encoded separately, then results are joined
         ids = []
         # chunks repeat a lot in natural text (" the", ","): encode each distinct
