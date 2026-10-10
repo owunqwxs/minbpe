@@ -9,6 +9,7 @@ Unlike BasicTokenizer:
 - RegexTokenizer handles optional special tokens.
 """
 
+from collections import defaultdict
 from itertools import compress, islice
 
 import regex as re
@@ -63,11 +64,13 @@ class RegexTokenizer(Tokenizer):
                 for p in zip(chunk_ids, chunk_ids[1:]):
                     stats[p] = stats_get(p, 0) + w
         stats_values = stats.values()
-        # where[t]: indices of chunks that contain (or once contained) token t
-        where = [set() for _ in range(max(vocab_size, 256))]
+        # where[p]: indices of chunks that contain (or once contained) pair p;
+        # only those chunks can hold an occurrence of p when it gets merged
+        # (chunk visiting order does not matter: chunks merge independently)
+        where = defaultdict(set)
         for k, chunk_ids in enumerate(ids):
-            for t in set(chunk_ids):
-                where[t].add(k)
+            for p in zip(chunk_ids, chunk_ids[1:]):
+                where[p].add(k)
 
         # iteratively merge the most common pairs to create new tokens
         merges = {} # (int, int) -> int
@@ -98,8 +101,8 @@ class RegexTokenizer(Tokenizer):
             # tokens, updating pair counts by the difference
             p0, p1 = pair
             touched = []
-            where_idx = where[idx]
-            for k in where[p0] & where[p1]:
+            # a merged pair never reappears, so its chunk set can be dropped
+            for k in where.pop(pair, ()):
                 old = ids[k]
                 new = merge(old, pair, idx)
                 if len(new) == len(old):
@@ -111,7 +114,7 @@ class RegexTokenizer(Tokenizer):
                     touched.append(p)
                 for p in zip(new, new[1:]):
                     stats[p] = stats_get(p, 0) + w
-                where_idx.add(k)
+                    where[p].add(k)
             for p in touched:
                 if stats_get(p) == 0:
                     del stats[p]
