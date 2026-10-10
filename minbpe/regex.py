@@ -155,11 +155,30 @@ class RegexTokenizer(Tokenizer):
 
     def encode_ordinary(self, text):
         """Encoding that ignores any special tokens."""
-        return self._encode_ordinary(text, {}, self._no_merge_rank())
+        cache, inf = self._encode_state()
+        return self._encode_ordinary(text, cache, inf)
 
     def _no_merge_rank(self):
         # int sentinel above every merge index: keeps rank comparisons int-int
         return max(self.merges.values(), default=0) + 1
+
+    # chunk cache entries kept across encode calls (bounded memory)
+    _CHUNK_CACHE_MAX = 1 << 16
+
+    def _encode_state(self):
+        # (chunk -> ids cache, no-merge rank), shared by encode calls as long
+        # as the merges stay the same: train() and load() assign a new dict,
+        # which (like any other change of the merges object or its size)
+        # starts a fresh cache
+        merges = self.merges
+        state = self.__dict__.get("_enc_state")
+        if state is None or state[0] is not merges or state[1] != len(merges):
+            state = (merges, len(merges), self._no_merge_rank(), {})
+            self._enc_state = state
+        cache = state[3]
+        if len(cache) > self._CHUNK_CACHE_MAX:
+            cache.clear()
+        return cache, state[2]
 
     def _encode_ordinary(self, text, cache, inf):
         # split text into chunks of text by categories defined in regex pattern
@@ -212,9 +231,8 @@ class RegexTokenizer(Tokenizer):
         # now all the special characters are separated from the rest of the text
         # all chunks of text are encoded separately, then results are joined
         ids = []
-        # one chunk cache and sentinel for all ordinary parts of this call
-        cache = {}
-        inf = self._no_merge_rank()
+        # one chunk cache and sentinel for all ordinary parts (shared across calls)
+        cache, inf = self._encode_state()
         for part in special_chunks:
             if part in special:
                 # this is a special token, encode it separately as a special case
