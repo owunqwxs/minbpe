@@ -82,6 +82,9 @@ def apply_merges(ids, merges, inf=None):
     """
     if len(ids) < 2:
         return ids
+    if len(ids) >= 256:
+        # long sequences: avoid the O(len) min/index/count scans per merge round
+        return _apply_merges_heap(ids, merges)
     merges_get = merges.get
     if inf is None:
         inf = float("inf")
@@ -147,6 +150,73 @@ def apply_merges(ids, merges, inf=None):
         ids = newids
         ranks = newranks
     return ids
+
+def _apply_merges_heap(ids, merges):
+    """
+    Same result as apply_merges, for long sequences: a doubly linked list over
+    the original positions plus a heap of (rank, position) entries for every
+    mergeable adjacent pair. Entries are validated lazily when popped (a pair
+    whose tokens changed is recomputed), and each round pops all entries of the
+    minimal rank in position order, i.e. sequence order. The first valid one
+    picks the pair (same as the first-seen minimal pair); its occurrences are
+    merged left to right, skipping overlaps, exactly like merge().
+    """
+    # imported lazily: only long inputs need it, keep it off the import path
+    from heapq import heapify, heappop, heappush
+    merges_get = merges.get
+    n = len(ids)
+    val = list(ids)
+    nxt = list(range(1, n + 1)) # n means "no next"
+    prv = list(range(-1, n - 1)) # -1 means "no previous"
+    heap = [(r, i) for i, r in enumerate(map(merges_get, zip(val, val[1:])))
+            if r is not None]
+    heapify(heap)
+    while heap:
+        r = heap[0][0]
+        pair = None
+        last = -1
+        merged = []
+        rest = []
+        while heap and heap[0][0] == r:
+            p = heappop(heap)[1]
+            if p == last:
+                continue # duplicate entry (pops come out in position order)
+            last = p
+            v = val[p]
+            if v is None:
+                continue # position was merged away
+            q = nxt[p]
+            if q == n:
+                continue
+            pr = (v, val[q])
+            if merges_get(pr) != r:
+                continue # stale entry
+            if pair is None:
+                pair = pr
+            elif pr != pair:
+                rest.append(p) # another pair with the same rank: later round
+                continue
+            val[p] = r
+            val[q] = None
+            q2 = nxt[q]
+            nxt[p] = q2
+            if q2 < n:
+                prv[q2] = p
+            merged.append(p)
+        for p in rest:
+            heappush(heap, (r, p))
+        for p in merged:
+            a = prv[p]
+            if a >= 0:
+                rk = merges_get((val[a], r))
+                if rk is not None:
+                    heappush(heap, (rk, a))
+            b = nxt[p]
+            if b < n:
+                rk = merges_get((r, val[b]))
+                if rk is not None:
+                    heappush(heap, (rk, p))
+    return [v for v in val if v is not None]
 
 # first two helper functions...
 def replace_control_characters(s: str) -> str:
