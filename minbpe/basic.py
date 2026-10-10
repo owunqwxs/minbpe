@@ -9,9 +9,9 @@ But:
 - Does not handle any special tokens.
 """
 
-from itertools import compress, islice
+from heapq import heapify, heappop, heappush
 
-from .base import Tokenizer, get_stats, merge, apply_merges
+from .base import Tokenizer, get_stats, merge, apply_merges, pop_top_pairs
 
 
 def _update_stats(stats, old, new, pair, idx):
@@ -28,6 +28,8 @@ def _update_stats(stats, old, new, pair, idx):
     index = new.index
     removed = [pair]
     rapp = removed.append
+    added = set() # pairs whose count went up
+    aadd = added.add
     prev = -2
     q = -1
     for m in range(k):
@@ -42,17 +44,20 @@ def _update_stats(stats, old, new, pair, idx):
             rapp(p)
             p = (a, idx)
             stats[p] = get(p, 0) + 1
+            aadd(p)
         if j + 2 < n_old:
             p = (p1, old[j+2])
             stats[p] -= 1
             rapp(p)
             p = (idx, new[q+1])
             stats[p] = get(p, 0) + 1
+            aadd(p)
         prev = q
     stats[pair] -= k
     for p in removed:
         if get(p) == 0:
             del stats[p]
+    return added
 
 
 class BasicTokenizer(Tokenizer):
@@ -75,19 +80,18 @@ class BasicTokenizer(Tokenizer):
         # afterwards the counts are updated locally around each merged occurrence
         stats = get_stats(ids)
         stats_get = stats.get
-        stats_values = stats.values()
+        # lazy max-heap of counts: no full scan of stats per merge
+        heap = [(-c, p) for p, c in stats.items()]
+        heapify(heap)
         for i in range(num_merges):
             # find the pair with the highest count; ties go to the pair whose
             # first occurrence in ids is earliest, which is what max() over a
             # freshly recounted dict (insertion = first-seen order) would pick
-            # (max/count/index over a plain list of counts run in C without a
-            # per-pair key call; the first maximal key is the max() result)
-            vals = list(stats_values)
-            top = max(vals)
-            if vals.count(top) == 1:
-                pair = next(islice(stats, vals.index(top), None))
+            top, cands = pop_top_pairs(heap, stats_get, heappush, heappop)
+            if len(cands) == 1:
+                pair = cands[0]
             else:
-                cands = set(compress(stats, map(top.__eq__, vals)))
+                cands = set(cands)
                 for p in zip(ids, ids[1:]):
                     if p in cands:
                         pair = p
@@ -96,7 +100,8 @@ class BasicTokenizer(Tokenizer):
             idx = 256 + i
             # replace all occurrences of pair in ids with idx
             new = merge(ids, pair, idx)
-            _update_stats(stats, ids, new, pair, idx)
+            for p in _update_stats(stats, ids, new, pair, idx):
+                heappush(heap, (-stats[p], p))
             ids = new
             # save the merge
             merges[pair] = idx

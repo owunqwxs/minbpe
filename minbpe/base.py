@@ -218,6 +218,40 @@ def _apply_merges_heap(ids, merges):
                     heappush(heap, (rk, p))
     return [v for v in val if v is not None]
 
+def pop_top_pairs(heap, stats_get, heappush, heappop):
+    """
+    Lazy max-heap over pair counts (training): heap holds (-count, pair)
+    entries, and for every pair in stats some entry has a count >= its current
+    count (callers push the new count whenever a count increases; decreases
+    are fixed up here when the stale entry surfaces). Returns (top, cands):
+    the maximal count and every pair with that count, i.e. the same as
+    max(stats.values()) and the pairs equal to it. The entries of the
+    candidates are pushed back, so the heap invariant still holds afterwards.
+    """
+    while True:
+        if not heap:
+            raise ValueError("max() arg is an empty sequence")
+        neg, p = heap[0]
+        c = stats_get(p)
+        if c == -neg:
+            break
+        heappop(heap)
+        if c is not None and c < -neg:
+            heappush(heap, (-c, p)) # count went down: re-file it
+    top = -neg
+    cands = []
+    while heap and heap[0][0] == neg:
+        p = heappop(heap)[1]
+        c = stats_get(p)
+        if c == top:
+            if p not in cands:
+                cands.append(p)
+        elif c is not None and c < top:
+            heappush(heap, (-c, p))
+    for p in cands:
+        heappush(heap, (neg, p))
+    return top, cands
+
 # first two helper functions...
 def replace_control_characters(s: str) -> str:
     # we don't want to print control characters
