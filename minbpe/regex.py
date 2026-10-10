@@ -130,6 +130,9 @@ class RegexTokenizer(Tokenizer):
             p0, p1 = pair
             touched = [pair]
             rapp = touched.append
+            # fast-path merges of pair, subtracted from stats[pair] once at the
+            # end (no fast-path neighbour pair equals pair: p0 occurs once)
+            fast_total = 0
             # a merged pair never reappears, so its chunk set can be dropped
             for k in where.pop(pair, ()):
                 old = ids[k]
@@ -143,9 +146,13 @@ class RegexTokenizer(Tokenizer):
                     n_old = len(old)
                     if j + 1 == n_old or old[j+1] != p1:
                         continue # stale entry
-                    ids[k] = old[:j] + [idx] + old[j+2:]
                     w = weights[k]
-                    stats[pair] -= w
+                    fast_total += w
+                    if j + 2 < n_old:
+                        b = old[j+2]
+                    # splice in place (ids[k] is private to this chunk)
+                    old[j] = idx
+                    del old[j+1]
                     if j:
                         a = old[j-1]
                         p = (a, p0)
@@ -156,7 +163,6 @@ class RegexTokenizer(Tokenizer):
                         where[p].add(k)
                         rapp(p)
                     if j + 2 < n_old:
-                        b = old[j+2]
                         p = (p1, b)
                         stats[p] -= w
                         rapp(p)
@@ -200,6 +206,7 @@ class RegexTokenizer(Tokenizer):
                         stats[p] = stats_get(p, 0) + w
                         where[p].add(k)
                         rapp(p)
+            stats[pair] -= fast_total
             for p in set(touched):
                 c = stats_get(p)
                 if c:
