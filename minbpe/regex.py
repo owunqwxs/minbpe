@@ -146,26 +146,35 @@ class RegexTokenizer(Tokenizer):
         text = text_bytes.decode("utf-8", errors="replace")
         return text
 
-    def _encode_chunk(self, text_bytes):
+    def _encode_chunk(self, text_bytes, inf=None):
         # return the token ids
         # let's begin. first, convert all bytes to integers in range 0..255
         # then repeatedly merge the pair with the lowest merge index
-        return apply_merges(list(text_bytes), self.merges)
+        # (inf: optional int "no merge" rank above every merge index)
+        return apply_merges(list(text_bytes), self.merges, inf)
 
     def encode_ordinary(self, text):
         """Encoding that ignores any special tokens."""
+        return self._encode_ordinary(text, {}, self._no_merge_rank())
+
+    def _no_merge_rank(self):
+        # int sentinel above every merge index: keeps rank comparisons int-int
+        return max(self.merges.values(), default=0) + 1
+
+    def _encode_ordinary(self, text, cache, inf):
         # split text into chunks of text by categories defined in regex pattern
         text_chunks = re.findall(self.compiled_pattern, text)
         # all chunks of text are encoded separately, then results are joined
         ids = []
         # chunks repeat a lot in natural text (" the", ","): encode each distinct
-        # chunk once per call
-        cache = {}
+        # chunk once per call (cache: chunk -> ids, shared by the caller)
+        cache_get = cache.get
+        encode_chunk = self._encode_chunk
         for chunk in text_chunks:
-            chunk_ids = cache.get(chunk)
+            chunk_ids = cache_get(chunk)
             if chunk_ids is None:
                 chunk_bytes = chunk.encode("utf-8") # raw bytes
-                chunk_ids = cache[chunk] = self._encode_chunk(chunk_bytes)
+                chunk_ids = cache[chunk] = encode_chunk(chunk_bytes, inf)
             ids.extend(chunk_ids)
         return ids
 
@@ -203,11 +212,14 @@ class RegexTokenizer(Tokenizer):
         # now all the special characters are separated from the rest of the text
         # all chunks of text are encoded separately, then results are joined
         ids = []
+        # one chunk cache and sentinel for all ordinary parts of this call
+        cache = {}
+        inf = self._no_merge_rank()
         for part in special_chunks:
             if part in special:
                 # this is a special token, encode it separately as a special case
                 ids.append(special[part])
-            else:
+            elif part:
                 # this is an ordinary sequence, encode it normally
-                ids.extend(self.encode_ordinary(part))
+                ids.extend(self._encode_ordinary(part, cache, inf))
         return ids
