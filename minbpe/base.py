@@ -5,7 +5,6 @@ It would be possible to be a lot more strict about the interface and
 e.g. isolating all regex/pattern parts to the RegexTokenizer, but
 some concessions are made for simplicity.
 """
-import unicodedata
 from itertools import repeat
 
 try:
@@ -258,6 +257,7 @@ def replace_control_characters(s: str) -> str:
     # which distort the output (e.g. \n or much worse)
     # https://stackoverflow.com/questions/4324790/removing-control-characters-from-a-string-in-python/19016117#19016117
     # http://www.unicode.org/reports/tr44/#GC_Values_Table
+    import unicodedata # only needed for pretty printing, keep it off the import path
     chars = []
     for ch in s:
         if unicodedata.category(ch)[0] != "C":
