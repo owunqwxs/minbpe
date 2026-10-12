@@ -14,7 +14,6 @@ from heapq import heapify, heappop, heappush
 
 import regex as re
 from .base import Tokenizer, merge, apply_merges, _count_elements
-from .basic import _ords
 
 
 # the main GPT text split patterns, see
@@ -294,6 +293,7 @@ class RegexTokenizer(Tokenizer):
                 encode_chunk = self._encode_chunk
                 for chunk in new:
                     cache[chunk] = "".join(map(chr, encode_chunk(chunk.encode("utf-8"), inf)))
+            from ._heap import _ords
             return _ords("".join(map(cache.__getitem__, text_chunks)))
         # each distinct chunk encoded once (loaded on first use)
         from ._slow import encode_plain
@@ -307,43 +307,5 @@ class RegexTokenizer(Tokenizer):
         this is the default tiktoken behavior right now as well
         any other behavior is either annoying, or a major footgun
         """
-        # decode the user desire w.r.t. handling of special tokens
-        special = None
-        if allowed_special == "all":
-            special = self.special_tokens
-        elif allowed_special == "none":
-            special = {}
-        elif allowed_special == "none_raise":
-            special = {}
-            assert all(token not in text for token in self.special_tokens)
-        elif isinstance(allowed_special, set):
-            special = {k: v for k, v in self.special_tokens.items() if k in allowed_special}
-        else:
-            raise ValueError(f"allowed_special={allowed_special} not understood")
-        if not special:
-            # shortcut: if no special tokens, just use the ordinary encoding
-            return self.encode_ordinary(text)
-        # otherwise, we have to be careful with potential special tokens in text
-        # we handle special tokens by splitting the text
-        # based on the occurrence of any exact match with any of the special tokens
-        # we can use re.split for this. note that surrounding the pattern with ()
-        # makes it into a capturing group, so the special tokens will be included
-        if "" in special:
-            special_pattern = "(" + "|".join(re.escape(k) for k in special) + ")"
-            special_chunks = re.split(special_pattern, text)
-        else:
-            from ._heap import _split_specials # loaded on first use
-            special_chunks = _split_specials(text, special)
-        # now all the special characters are separated from the rest of the text
-        # all chunks of text are encoded separately, then results are joined
-        ids = []
-        # one chunk cache and sentinel for all ordinary parts (shared across calls)
-        cache, inf = self._encode_state()
-        for part in special_chunks:
-            if part in special:
-                # this is a special token, encode it separately as a special case
-                ids.append(special[part])
-            elif part:
-                # this is an ordinary sequence, encode it normally
-                ids.extend(self._encode_ordinary(part, cache, inf))
-        return ids
+        from ._heap import regex_encode # loaded on first use
+        return regex_encode(self, text, allowed_special)

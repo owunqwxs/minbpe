@@ -9,7 +9,6 @@ But:
 - Does not handle any special tokens.
 """
 
-import sys
 from heapq import heapify, heappop, heappush
 
 from .base import Tokenizer, get_stats, apply_merges, pop_top_pairs
@@ -136,6 +135,7 @@ class BasicTokenizer(Tokenizer):
         # (int "no merge" sentinel above every merge index: cheap int compares)
         merges = self.merges
         if len(ids) >= 256 and merges:
+            from ._heap import _replace_table, _ords # loaded on first use
             table = _replace_table(merges)
             if table is not None:
                 # same result as apply_merges, with every merge done in C
@@ -144,44 +144,3 @@ class BasicTokenizer(Tokenizer):
                     s = s.replace(ps, c)
                 return _ords(s)
         return apply_merges(ids, merges, max(merges.values(), default=0) + 1)
-
-
-_UTF32 = "utf-32-le" if sys.byteorder == "little" else "utf-32-be"
-
-
-def _ords(s):
-    # list(map(ord, s)), done in C (the code points as native uint32)
-    return memoryview(s.encode(_UTF32, "surrogatepass")).cast("I").tolist()
-
-
-def _replace_table(merges):
-    """
-    [(chr(p0) + chr(p1), chr(idx))] in increasing idx order, or None if the
-    merges do not allow it. apply_merges always merges the present pair with
-    the lowest idx; when every idx is a distinct int above both of its pair's
-    tokens, a merge only creates pairs with a higher idx, so this is the same
-    as replacing every pair in increasing idx order (str.replace matches left
-    to right without overlaps, exactly like merge()).
-    """
-    if _memo[0] == merges:
-        return _memo[1]
-    _memo[:] = dict(merges), _build_table(merges)
-    return _memo[1]
-
-
-_memo = [None, None] # last (merges copy, table) of _replace_table
-
-
-def _build_table(merges):
-    items = sorted(merges.items(), key=lambda kv: kv[1])
-    table = []
-    app = table.append
-    prev = -1
-    for (p0, p1), idx in items:
-        if (type(idx) is not int or type(p0) is not int or type(p1) is not int
-                or idx <= prev or idx >= 0x110000 or p0 < 0 or p1 < 0
-                or idx <= p0 or idx <= p1):
-            return None
-        prev = idx
-        app((chr(p0) + chr(p1), chr(idx)))
-    return table
