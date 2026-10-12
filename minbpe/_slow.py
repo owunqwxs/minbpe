@@ -19,6 +19,26 @@ def replace_control_characters(s):
     return "".join(chars)
 
 
+def save(self, file_prefix):
+    # body of Tokenizer.save: the model file (used by load()), then the vocab
+    with open(file_prefix + ".model", 'w') as f:
+        # the version, pattern and special tokens, then the merges
+        f.write("minbpe v1\n")
+        f.write(f"{self.pattern}\n")
+        f.write(f"{len(self.special_tokens)}\n")
+        for special, idx in self.special_tokens.items():
+            f.write(f"{special} {idx}\n")
+        for idx1, idx2 in self.merges:
+            f.write(f"{idx1} {idx2}\n")
+    save_vocab(self, file_prefix + ".vocab")
+
+
+def basic_decode(self, ids):
+    # body of BasicTokenizer.decode
+    text_bytes = b"".join(self.vocab[idx] for idx in ids)
+    return text_bytes.decode("utf-8", errors="replace")
+
+
 def save_vocab(self, vocab_file):
     # the human-readable .vocab file of Tokenizer.save (lossy: errors='replace')
     inverted_merges = {idx: pair for pair, idx in self.merges.items()}

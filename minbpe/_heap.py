@@ -69,13 +69,80 @@ def regex_encode(self, text, allowed_special):
         special_chunks = _split_specials(text, special)
     ids = []
     # one chunk cache and sentinel for all ordinary parts (shared across calls)
-    cache, inf = self._encode_state()
+    cache, inf = encode_state(self)
     for part in special_chunks:
         if part in special:
             ids.append(special[part])
         elif part:
-            ids.extend(self._encode_ordinary(part, cache, inf))
+            ids.extend(encode_ordinary(self, part, cache, inf))
     return ids
+
+
+def encode_state(self):
+    # (chunk -> ids cache, no-merge rank), shared by encode calls as long
+    # as the merges stay the same: train() and load() assign a new dict,
+    # which (like any other change of the merges object or its size)
+    # starts a fresh cache
+    merges = self.merges
+    state = self.__dict__.get("_enc_state")
+    if state is None or state[0] is not merges or state[1] != len(merges):
+        # int sentinel above every merge index: keeps rank comparisons int-int
+        inf = max(merges.values(), default=0) + 1
+        state = (merges, len(merges), inf, {}, _chunk_table(merges))
+        self._enc_state = state
+    cache = state[3]
+    if len(cache) > self._CHUNK_CACHE_MAX:
+        cache.clear()
+    return cache, state[2]
+
+
+def encode_ordinary(self, text, cache=None, inf=None):
+    # body of RegexTokenizer.encode_ordinary
+    if cache is None:
+        cache, inf = encode_state(self)
+    # split text into chunks of text by categories defined in regex pattern
+    text_chunks = self.compiled_pattern.findall(text)
+    table = self._enc_state[4]
+    if table is not None:
+        new = set(text_chunks).difference(cache)
+        if len(new) >= 16:
+            # encode all new chunks at once, every merge done in C: the
+            # chunks are joined with byte 0xff (never produced by UTF-8 and
+            # in no merge pair, so no merge crosses a chunk boundary), then
+            # each merge is replaced in increasing idx order (same result
+            # as apply_merges per chunk, see basic._replace_table)
+            new = list(new)
+            s = b"\xff".join(map(str.encode, new)).decode("latin-1")
+            for ps, c in table:
+                s = s.replace(ps, c)
+            # with a table, cached ids are kept as str of chr(id)
+            cache.update(zip(new, s.split("\xff")))
+        elif new:
+            encode_chunk = self._encode_chunk
+            for chunk in new:
+                cache[chunk] = "".join(map(chr, encode_chunk(chunk.encode("utf-8"), inf)))
+        return _ords("".join(map(cache.__getitem__, text_chunks)))
+    # each distinct chunk encoded once (loaded on first use)
+    from ._slow import encode_plain
+    return encode_plain(self, text_chunks, cache, inf)
+
+
+def basic_encode(self, text):
+    # body of BasicTokenizer.encode
+    text_bytes = text.encode("utf-8") # raw bytes
+    ids = list(text_bytes) # list of integers in range 0..255
+    # repeatedly merge the pair with the lowest merge index
+    # (int "no merge" sentinel above every merge index: cheap int compares)
+    merges = self.merges
+    if len(ids) >= 256 and merges:
+        table = _replace_table(merges)
+        if table is not None:
+            # same result as apply_merges, with every merge done in C
+            s = text_bytes.decode("latin-1")
+            for ps, c in table:
+                s = s.replace(ps, c)
+            return _ords(s)
+    return apply_merges(ids, merges, max(merges.values(), default=0) + 1)
 
 
 def apply_merges(ids, merges, inf=None):

@@ -123,24 +123,10 @@ class BasicTokenizer(Tokenizer):
 
     def decode(self, ids):
         # given ids (list of integers), return Python string
-        text_bytes = b"".join(self.vocab[idx] for idx in ids)
-        text = text_bytes.decode("utf-8", errors="replace")
-        return text
+        from ._slow import basic_decode # loaded on first use
+        return basic_decode(self, ids)
 
     def encode(self, text):
-        # given a string text, return the token ids
-        text_bytes = text.encode("utf-8") # raw bytes
-        ids = list(text_bytes) # list of integers in range 0..255
-        # repeatedly merge the pair with the lowest merge index
-        # (int "no merge" sentinel above every merge index: cheap int compares)
-        merges = self.merges
-        if len(ids) >= 256 and merges:
-            from ._heap import _replace_table, _ords # loaded on first use
-            table = _replace_table(merges)
-            if table is not None:
-                # same result as apply_merges, with every merge done in C
-                s = text_bytes.decode("latin-1")
-                for ps, c in table:
-                    s = s.replace(ps, c)
-                return _ords(s)
-        return apply_merges(ids, merges, max(merges.values(), default=0) + 1)
+        # given a string text, return the token ids (loaded on first use)
+        from ._heap import basic_encode
+        return basic_encode(self, text)

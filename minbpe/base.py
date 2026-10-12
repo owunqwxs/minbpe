@@ -167,22 +167,8 @@ class Tokenizer:
         - model file is the critical one, intended for load()
         - vocab file is just a pretty printed version for human inspection only
         """
-        # write the model: to be used in load() later
-        model_file = file_prefix + ".model"
-        with open(model_file, 'w') as f:
-            # write the version, pattern and merges, that's all that's needed
-            f.write("minbpe v1\n")
-            f.write(f"{self.pattern}\n")
-            # write the special tokens, first the number of them, then each one
-            f.write(f"{len(self.special_tokens)}\n")
-            for special, idx in self.special_tokens.items():
-                f.write(f"{special} {idx}\n")
-            # the merges dict
-            for idx1, idx2 in self.merges:
-                f.write(f"{idx1} {idx2}\n")
-        # write the vocab: for the human to look at (loaded on first use)
-        from ._slow import save_vocab
-        save_vocab(self, file_prefix + ".vocab")
+        from ._slow import save # loaded on first use
+        save(self, file_prefix)
 
     def load(self, model_file):
         """Inverse of save() but only for the model file"""
