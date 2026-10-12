@@ -66,33 +66,6 @@ def apply_merges(ids, merges, inf=None):
     from ._heap import apply_merges # loaded on first use (encoding only)
     return apply_merges(ids, merges, inf)
 
-def pop_top_pairs(heap, stats_get, heappush, heappop):
-    # lazy max-heap of (-count, pair) for training: returns the maximal count
-    # and every pair with it, pushing the candidates back onto the heap
-    while True:
-        if not heap:
-            raise ValueError("max() arg is an empty sequence")
-        neg, p = heap[0]
-        c = stats_get(p)
-        if c == -neg:
-            break
-        heappop(heap)
-        if c and c < -neg:
-            heappush(heap, (-c, p)) # count went down: re-file it (not 0)
-    top = -neg
-    cands = []
-    while heap and heap[0][0] == neg:
-        p = heappop(heap)[1]
-        c = stats_get(p)
-        if c == top:
-            if p not in cands:
-                cands.append(p)
-        elif c and c < top:
-            heappush(heap, (-c, p))
-    for p in cands:
-        heappush(heap, (neg, p))
-    return top, cands
-
 # first two helper functions...
 def replace_control_characters(s: str) -> str:
     # we don't want to print control characters (pretty printing only)

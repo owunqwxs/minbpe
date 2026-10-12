@@ -1,7 +1,8 @@
 """Rarely used code, loaded on first use (off the package import path)."""
 from heapq import heapify, heappop, heappush
 
-from .base import merge, pop_top_pairs, render_token
+from .base import merge, render_token
+from ._train import pop_top_pairs
 
 
 def replace_control_characters(s):

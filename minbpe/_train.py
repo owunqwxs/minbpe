@@ -2,10 +2,85 @@
 from heapq import heapify, heappop, heappush
 from operator import itemgetter
 
-from .base import get_stats, merge, pop_top_pairs, _count_elements
+from .base import get_stats, merge, _count_elements
 
 _last = itemgetter(-1)
 _first = itemgetter(0)
+
+def pop_top_pairs(heap, stats_get, heappush, heappop):
+    while True:
+        if not heap:
+            raise ValueError("max() arg is an empty sequence")
+        neg, p = heap[0]
+        c = stats_get(p)
+        if c == -neg:
+            break
+        heappop(heap)
+        if c and c < -neg:
+            heappush(heap, (-c, p)) # count went down: re-file it (not 0)
+    top = -neg
+    cands = []
+    while heap and heap[0][0] == neg:
+        p = heappop(heap)[1]
+        c = stats_get(p)
+        if c == top:
+            if p not in cands:
+                cands.append(p)
+        elif c and c < top:
+            heappush(heap, (-c, p))
+    for p in cands:
+        heappush(heap, (neg, p))
+    return top, cands
+
+def regex_train(self, text, vocab_size, verbose=False):
+    # body of RegexTokenizer.train (ties: earliest first occurrence, as max())
+    from collections import defaultdict
+    assert vocab_size >= 256
+    num_merges = vocab_size - 256
+    chunk_counts = {}
+    _count_elements(chunk_counts, self.compiled_pattern.findall(text))
+    ids = [list(ch.encode("utf-8")) for ch in chunk_counts]
+    weights = list(chunk_counts.values())
+    stats = {}
+    stats_get = stats.get
+    where = defaultdict(list)
+    for k, (chunk_ids, w) in enumerate(zip(ids, weights)):
+        for p in zip(chunk_ids, chunk_ids[1:]):
+            stats[p] = stats_get(p, 0) + w
+            where[p].append(k)
+    heap = [(-c, p) for p, c in stats.items()]
+    heapify(heap)
+    merges = {}
+    vocab = {idx: bytes([idx]) for idx in range(256)}
+    for i in range(num_merges):
+        try:
+            top, tied = pop_top_pairs(heap, stats_get, heappush, heappop)
+        except ValueError:
+            max(()) # no positive count left: max()'s own error
+        pair = tied[0]
+        if len(tied) > 1:
+            best_k, best_j = len(ids), 0
+            for p in tied:
+                for k in sorted(where[p]):
+                    if k > best_k:
+                        break
+                    chunk_ids = ids[k]
+                    for j, q in enumerate(zip(chunk_ids, chunk_ids[1:])):
+                        if q == p:
+                            break
+                    else:
+                        continue # stale entry: p no longer in chunk k
+                    if k < best_k or j < best_j:
+                        best_k, best_j, pair = k, j, p
+                    break
+        idx = 256 + i
+        regex_merge(ids, weights, where, stats, heap, pair, idx)
+        merges[pair] = idx
+        vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
+        if verbose:
+            print(f"merge {i+1}/{num_merges}: {pair} -> {idx} ({vocab[idx]}) had {top} occurrences")
+    self.merges = merges # used in encode()
+    self.vocab = vocab   # used in decode()
 
 
 def regex_merge(ids, weights, where, stats, heap, pair, idx):
