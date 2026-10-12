@@ -84,22 +84,31 @@ class RegexTokenizer(Tokenizer):
             # is what max() over a freshly recounted dict would pick
             # (the tie-break does not depend on dict order, so the top pairs
             # come from the heap: drop stale entries, then pop all valid ties)
+            # (only count increases push an entry; an entry whose count went
+            # down is re-filed with its current count when it surfaces)
             while heap:
                 c, pair = heap[0]
-                if stats_get(pair) == -c:
+                cur = stats_get(pair)
+                if cur == -c:
                     break
                 heappop(heap)
+                if cur and cur < -c:
+                    heappush(heap, (-cur, pair))
             else:
-                max(stats_values) # empty stats: same error as before
+                # no positive count left: same error as before
+                max(filter(None, stats_values))
             top = -c
             heappop(heap)
             tied = None
             while heap and heap[0][0] == c:
                 q = heappop(heap)[1]
-                if stats_get(q) == top:
+                cur = stats_get(q)
+                if cur == top:
                     if tied is None:
                         tied = {pair}
                     tied.add(q)
+                elif cur and cur < top:
+                    heappush(heap, (-cur, q))
             if tied is not None and len(tied) > 1:
                 for q in tied:
                     heappush(heap, (c, q))
@@ -128,8 +137,10 @@ class RegexTokenizer(Tokenizer):
             # replace all occurrences of pair in the chunks that hold both
             # tokens, updating pair counts by the difference
             p0, p1 = pair
-            touched = [pair]
-            rapp = touched.append
+            # pairs whose count went up (all contain idx); a count that drops
+            # to 0 stays 0 (new pairs contain idx), so those stay in stats
+            added = set()
+            aadd = added.add
             # fast-path merges of pair, subtracted from stats[pair] once at the
             # end (no fast-path neighbour pair equals pair: p0 occurs once)
             fast_total = 0
@@ -155,21 +166,17 @@ class RegexTokenizer(Tokenizer):
                     del old[j+1]
                     if j:
                         a = old[j-1]
-                        p = (a, p0)
-                        stats[p] -= w
-                        rapp(p)
+                        stats[(a, p0)] -= w
                         p = (a, idx)
                         stats[p] = stats_get(p, 0) + w
                         where[p].add(k)
-                        rapp(p)
+                        aadd(p)
                     if j + 2 < n_old:
-                        p = (p1, b)
-                        stats[p] -= w
-                        rapp(p)
+                        stats[(p1, b)] -= w
                         p = (idx, b)
                         stats[p] = stats_get(p, 0) + w
                         where[p].add(k)
-                        rapp(p)
+                        aadd(p)
                     continue
                 new = merge(old, pair, idx)
                 n_old = len(old)
@@ -191,28 +198,20 @@ class RegexTokenizer(Tokenizer):
                         if a != idx:
                             # (an adjacent previous occurrence already
                             # accounted for the pair between them)
-                            p = (a, p0)
-                            stats[p] -= w
-                            rapp(p)
+                            stats[(a, p0)] -= w
                             p = (a, idx)
                             stats[p] = stats_get(p, 0) + w
                             where[p].add(k)
-                            rapp(p)
+                            aadd(p)
                     if j + 2 < n_old:
-                        p = (p1, old[j+2])
-                        stats[p] -= w
-                        rapp(p)
+                        stats[(p1, old[j+2])] -= w
                         p = (idx, new[q+1])
                         stats[p] = stats_get(p, 0) + w
                         where[p].add(k)
-                        rapp(p)
+                        aadd(p)
             stats[pair] -= fast_total
-            for p in set(touched):
-                c = stats_get(p)
-                if c:
-                    heappush(heap, (-c, p))
-                elif c == 0:
-                    del stats[p]
+            for p in added:
+                heappush(heap, (-stats[p], p))
             # save the merge
             merges[pair] = idx
             vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
