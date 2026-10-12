@@ -1,10 +1,5 @@
-"""
-Contains the base Tokenizer class and a few common helper functions.
-The base class also contains the (common) save/load functionality.
-It would be possible to be a lot more strict about the interface and
-e.g. isolating all regex/pattern parts to the RegexTokenizer, but
-some concessions are made for simplicity.
-"""
+# Contains the base Tokenizer class and a few common helper functions.
+# The base class also contains the (common) save/load functionality.
 try:
     from _collections import _count_elements
 except ImportError: # pragma: no cover - pure python fallback
@@ -65,31 +60,15 @@ def merge(ids, pair, idx):
     return newids
 
 def apply_merges(ids, merges, inf=None):
-    """
-    Repeatedly merge the pair with the lowest merge index until none applies.
-    Same result as min() over get_stats(ids) keyed by merges.get(p, inf): the
-    rank list is in position order, so .index() finds the first-seen pair
-    among the minimal ones, and the minimal rank is the merged token itself.
-    The rank list is computed once and then patched locally around each merged
-    occurrence (only the pairs touching a merged token change), instead of
-    being recomputed over the whole sequence after every merge.
-    inf: optional "no merge" rank, must be greater than every value in merges
-    (an int sentinel keeps all rank comparisons int-int, which are much
-    cheaper than int-float ones); defaults to float("inf").
-    """
+    # repeatedly merge the pair with the lowest merge index until none applies
+    # (inf: optional int "no merge" rank above every value in merges); the
+    # implementation lives in _heap.apply_merges, loaded on first use
     from ._heap import apply_merges # loaded on first use (encoding only)
     return apply_merges(ids, merges, inf)
 
 def pop_top_pairs(heap, stats_get, heappush, heappop):
-    """
-    Lazy max-heap over pair counts (training): heap holds (-count, pair)
-    entries, and for every pair in stats some entry has a count >= its current
-    count (callers push the new count whenever a count increases; decreases
-    are fixed up here when the stale entry surfaces). Returns (top, cands):
-    the maximal count and every pair with that count, i.e. the same as
-    max(stats.values()) and the pairs equal to it. The entries of the
-    candidates are pushed back, so the heap invariant still holds afterwards.
-    """
+    # lazy max-heap of (-count, pair) for training: returns the maximal count
+    # and every pair with it, pushing the candidates back onto the heap
     while True:
         if not heap:
             raise ValueError("max() arg is an empty sequence")

@@ -9,11 +9,8 @@ Unlike BasicTokenizer:
 - RegexTokenizer handles optional special tokens.
 """
 
-from collections import defaultdict
-from heapq import heapify, heappop, heappush
-
 import regex as re
-from .base import Tokenizer, merge, apply_merges, _count_elements, pop_top_pairs
+from .base import Tokenizer, apply_merges
 
 
 # the main GPT text split patterns, see
@@ -37,6 +34,11 @@ class RegexTokenizer(Tokenizer):
         self.inverse_special_tokens = {}
 
     def train(self, text, vocab_size, verbose=False):
+        # training-only code and imports (loaded on first use)
+        from collections import defaultdict
+        from heapq import heapify, heappop, heappush
+        from .base import _count_elements
+        from ._train import pop_top_pairs, regex_merge
         assert vocab_size >= 256
         num_merges = vocab_size - 256
 
@@ -111,81 +113,7 @@ class RegexTokenizer(Tokenizer):
             idx = 256 + i
             # replace all occurrences of pair in the chunks that hold both
             # tokens, updating pair counts by the difference
-            p0, p1 = pair
-            # pairs whose count went up (all contain idx); a count that drops
-            # to 0 stays 0 (new pairs contain idx), so those stay in stats
-            # (new pairs contain idx, so none is in stats yet and no decrement
-            # below touches one: count them apart, add them to stats at the end)
-            added = {}
-            added_get = added.get
-            # fast-path merges of pair, subtracted from stats[pair] once at the
-            # end (no fast-path neighbour pair equals pair: p0 occurs once)
-            fast_total = 0
-            # a merged pair never reappears, so its chunk set can be dropped
-            for k in where.pop(pair, ()):
-                old = ids[k]
-                c = old.count(p0)
-                if c == 1:
-                    # fast path (most chunks): one occurrence of p0, so at
-                    # most one merge; same stats updates, same order
-                    j = old.index(p0)
-                    e = j + 2
-                    n_old = len(old)
-                    if e > n_old or old[j+1] != p1:
-                        continue # stale entry
-                    w = weights[k]
-                    fast_total += w
-                    if j:
-                        a = old[j-1]
-                        stats[(a, p0)] -= w
-                        p = (a, idx)
-                        added[p] = added_get(p, 0) + w
-                        where[p].append(k)
-                    if e < n_old:
-                        b = old[e]
-                        stats[(p1, b)] -= w
-                        p = (idx, b)
-                        added[p] = added_get(p, 0) + w
-                        where[p].append(k)
-                    # splice in place (ids[k] is private to this chunk)
-                    old[j] = idx
-                    del old[j+1]
-                    continue
-                if not c:
-                    continue # stale entry
-                new = merge(old, pair, idx)
-                n_old = len(old)
-                m = n_old - len(new) # number of merged occurrences
-                if not m:
-                    continue
-                ids[k] = new
-                w = weights[k]
-                stats[pair] -= w * m
-                # only the pairs touching a merged occurrence change (idx does
-                # not occur in old, so new[q] == idx marks exactly the merges)
-                index = new.index
-                q = -1
-                for c in range(m):
-                    q = index(idx, q + 1)
-                    j = q + c # position of this occurrence in old
-                    if q:
-                        a = new[q-1]
-                        if a != idx:
-                            # (an adjacent previous occurrence already
-                            # accounted for the pair between them)
-                            stats[(a, p0)] -= w
-                            p = (a, idx)
-                            added[p] = added_get(p, 0) + w
-                            where[p].append(k)
-                    if j + 2 < n_old:
-                        stats[(p1, old[j+2])] -= w
-                        p = (idx, new[q+1])
-                        added[p] = added_get(p, 0) + w
-                        where[p].append(k)
-            stats[pair] -= fast_total
-            stats.update(added)
-            for p, c in added.items():
-                heappush(heap, (-c, p))
+            regex_merge(ids, weights, where, stats, heap, pair, idx)
             # save the merge
             merges[pair] = idx
             vocab[idx] = vocab[pair[0]] + vocab[pair[1]]

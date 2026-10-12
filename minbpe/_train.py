@@ -2,10 +2,76 @@
 from heapq import heapify, heappop, heappush
 from operator import itemgetter
 
-from .base import get_stats, pop_top_pairs, _count_elements
+from .base import get_stats, merge, pop_top_pairs, _count_elements
 
 _last = itemgetter(-1)
 _first = itemgetter(0)
+
+
+def regex_merge(ids, weights, where, stats, heap, pair, idx):
+    # one merge step of RegexTokenizer.train over the chunks holding pair
+    p0, p1 = pair
+    added = {} # new pairs (all contain idx, so none is in stats yet)
+    added_get = added.get
+    fast_total = 0
+    for k in where.pop(pair, ()):
+        old = ids[k]
+        c = old.count(p0)
+        if c == 1:
+            # fast path: one occurrence of p0, so at most one merge
+            j = old.index(p0)
+            e = j + 2
+            n_old = len(old)
+            if e > n_old or old[j+1] != p1:
+                continue # stale entry
+            w = weights[k]
+            fast_total += w
+            if j:
+                a = old[j-1]
+                stats[(a, p0)] -= w
+                p = (a, idx)
+                added[p] = added_get(p, 0) + w
+                where[p].append(k)
+            if e < n_old:
+                b = old[e]
+                stats[(p1, b)] -= w
+                p = (idx, b)
+                added[p] = added_get(p, 0) + w
+                where[p].append(k)
+            old[j] = idx
+            del old[j+1]
+            continue
+        if not c:
+            continue # stale entry
+        new = merge(old, pair, idx)
+        n_old = len(old)
+        m = n_old - len(new) # number of merged occurrences
+        if not m:
+            continue
+        ids[k] = new
+        w = weights[k]
+        stats[pair] -= w * m
+        index = new.index
+        q = -1
+        for c in range(m):
+            q = index(idx, q + 1)
+            j = q + c # position of this occurrence in old
+            if q:
+                a = new[q-1]
+                if a != idx:
+                    stats[(a, p0)] -= w
+                    p = (a, idx)
+                    added[p] = added_get(p, 0) + w
+                    where[p].append(k)
+            if j + 2 < n_old:
+                stats[(p1, old[j+2])] -= w
+                p = (idx, new[q+1])
+                added[p] = added_get(p, 0) + w
+                where[p].append(k)
+    stats[pair] -= fast_total
+    stats.update(added)
+    for p, c in added.items():
+        heappush(heap, (-c, p))
 
 
 def basic_train(self, text, vocab_size, verbose):
