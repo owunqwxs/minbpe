@@ -224,6 +224,16 @@ def _replace_table(merges):
     as replacing every pair in increasing idx order (str.replace matches left
     to right without overlaps, exactly like merge()).
     """
+    if _memo[0] == merges:
+        return _memo[1]
+    _memo[:] = dict(merges), _build_table(merges)
+    return _memo[1]
+
+
+_memo = [None, None] # last (merges copy, table) of _replace_table
+
+
+def _build_table(merges):
     items = sorted(merges.items(), key=lambda kv: kv[1])
     table = []
     app = table.append

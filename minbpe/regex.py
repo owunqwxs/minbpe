@@ -32,6 +32,23 @@ def _chunk_table(merges):
     return table
 
 
+def _split_specials(text, special):
+    # re.split of the escaped tokens alternation (non-empty tokens), no regex
+    parts = []
+    pos = 0
+    while True:
+        best = -1
+        for k in special:
+            i = text.find(k, pos)
+            if i != -1 and (best == -1 or i < best):
+                best, tok = i, k
+        if best == -1:
+            parts.append(text[pos:])
+            return parts
+        parts += text[pos:best], tok
+        pos = best + len(tok)
+
+
 # the main GPT text split patterns, see
 # https://github.com/openai/tiktoken/blob/main/tiktoken_ext/openai_public.py
 GPT2_SPLIT_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -297,7 +314,7 @@ class RegexTokenizer(Tokenizer):
 
     def _encode_ordinary(self, text, cache, inf):
         # split text into chunks of text by categories defined in regex pattern
-        text_chunks = re.findall(self.compiled_pattern, text)
+        text_chunks = self.compiled_pattern.findall(text)
         table = self._enc_state[4]
         if table is not None:
             new = set(text_chunks).difference(cache)
@@ -360,8 +377,11 @@ class RegexTokenizer(Tokenizer):
         # based on the occurrence of any exact match with any of the special tokens
         # we can use re.split for this. note that surrounding the pattern with ()
         # makes it into a capturing group, so the special tokens will be included
-        special_pattern = "(" + "|".join(re.escape(k) for k in special) + ")"
-        special_chunks = re.split(special_pattern, text)
+        if "" in special:
+            special_pattern = "(" + "|".join(re.escape(k) for k in special) + ")"
+            special_chunks = re.split(special_pattern, text)
+        else:
+            special_chunks = _split_specials(text, special)
         # now all the special characters are separated from the rest of the text
         # all chunks of text are encoded separately, then results are joined
         ids = []
