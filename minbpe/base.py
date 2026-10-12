@@ -62,8 +62,8 @@ def merge(ids, pair, idx):
 def apply_merges(ids, merges, inf=None):
     # repeatedly merge the pair with the lowest merge index until none applies
     # (inf: optional int "no merge" rank above every value in merges); the
-    # implementation lives in _heap.apply_merges, loaded on first use
-    from ._heap import apply_merges # loaded on first use (encoding only)
+    # implementation lives in _slow.apply_merges, loaded on first use
+    from ._slow import apply_merges # loaded on first use
     return apply_merges(ids, merges, inf)
 
 # first two helper functions...

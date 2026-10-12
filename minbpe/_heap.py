@@ -1,5 +1,4 @@
 """Encoding-only helpers, loaded on first use (off the package import path)."""
-from itertools import repeat
 import sys
 
 _UTF32 = "utf-32-le" if sys.byteorder == "little" else "utf-32-be"
@@ -130,22 +129,18 @@ def encode_ordinary(self, text, cache=None, inf=None):
     table = self._enc_state[4]
     if table is not None:
         new = set(text_chunks).difference(cache)
-        if len(new) >= 16:
+        if new:
             # encode all new chunks at once, every merge done in C: the
             # chunks are joined with byte 0xff (never produced by UTF-8 and
             # in no merge pair, so no merge crosses a chunk boundary), then
             # each merge is replaced in increasing idx order (same result
-            # as apply_merges per chunk, see basic._replace_table)
+            # as apply_merges per chunk, see _replace_table)
             new = list(new)
             s = b"\xff".join(map(str.encode, new)).decode("latin-1")
             for ps, c in table:
                 s = s.replace(ps, c)
             # with a table, cached ids are kept as str of chr(id)
             cache.update(zip(new, s.split("\xff")))
-        elif new:
-            encode_chunk = self._encode_chunk
-            for chunk in new:
-                cache[chunk] = "".join(map(chr, encode_chunk(chunk.encode("utf-8"), inf)))
         return _ords("".join(map(cache.__getitem__, text_chunks)))
     # each distinct chunk encoded once (loaded on first use)
     from ._slow import encode_plain
@@ -167,81 +162,12 @@ def basic_encode(self, text):
             for ps, c in table:
                 s = s.replace(ps, c)
             return _ords(s)
+    from ._slow import apply_merges # loaded on first use
     return apply_merges(ids, merges, max(merges.values(), default=0) + 1)
 
 
-def apply_merges(ids, merges, inf=None):
-    # see base.apply_merges (same function, kept off the import path)
-    if len(ids) < 2:
-        return ids
-    if len(ids) >= 256:
-        return _apply_merges_heap(ids, merges)
-    merges_get = merges.get
-    if inf is None:
-        inf = float("inf")
-    ranks = list(map(merges_get, zip(ids, ids[1:]), repeat(inf)))
-    ids = list(ids) # private copy: the single-occurrence path edits it in place
-    while ranks:
-        idx = min(ranks)
-        if idx == inf:
-            break # nothing else can be merged anymore
-        j = ranks.index(idx)
-        k = ranks.count(idx)
-        if k == 1:
-            ids[j] = idx
-            del ids[j+1]
-            del ranks[j]
-            if j:
-                ranks[j-1] = merges_get((ids[j-1], idx), inf)
-            if j < len(ranks):
-                ranks[j] = merges_get((idx, ids[j+1]), inf)
-            continue
-        p0 = ids[j]
-        p1 = ids[j+1]
-        last = len(ranks) - 1 # last pair position
-        newids = []
-        ext = newids.extend
-        app = newids.append
-        newranks = []
-        rext = newranks.extend
-        rapp = newranks.append
-        index = ranks.index
-        s = 0 # start of the not yet copied part of ids / ranks
-        first = True
-        while True:
-            k -= 1
-            if ids[j] == p0 and ids[j+1] == p1:
-                # merge the occurrence at j (same left-to-right order as merge())
-                if s < j:
-                    if not first:
-                        rapp(merges_get((idx, ids[s]), inf))
-                    rext(ranks[s:j-1])
-                    rapp(merges_get((ids[j-1], idx), inf))
-                    ext(ids[s:j])
-                elif not first:
-                    rapp(merges_get((idx, idx), inf))
-                app(idx)
-                first = False
-                s = j + 2
-                if j < last and ranks[j+1] == idx:
-                    k -= 1 # overlapping position j+1 is skipped
-                start = s
-            else:
-                start = j + 1
-            if not k:
-                break
-            j = index(idx, start)
-        if s <= last + 1:
-            rapp(merges_get((idx, ids[s]), inf))
-            rext(ranks[s:])
-            ext(ids[s:])
-        ids = newids
-        ranks = newranks
-    return ids
-
-
 def _chunk_table(merges):
-    # basic._replace_table, or None if the 0xff chunk separator could clash
+    # _replace_table, or None if the 0xff chunk separator could clash
     # with a merge (as a pair token or as a minted token)
     if not merges:
         return None
@@ -269,9 +195,3 @@ def _split_specials(text, special):
             return parts
         parts += text[pos:best], tok
         pos = best + len(tok)
-
-
-def _apply_merges_heap(ids, merges):
-    # long sequences (loaded on first use), see _slow.apply_merges_heap
-    from ._slow import apply_merges_heap
-    return apply_merges_heap(ids, merges)
