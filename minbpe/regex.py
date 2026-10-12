@@ -15,38 +15,7 @@ from heapq import heapify, heappop, heappush
 import regex as re
 from itertools import chain
 from .base import Tokenizer, merge, apply_merges, _count_elements
-from .basic import _replace_table, _ords
-
-
-def _chunk_table(merges):
-    # basic._replace_table, or None if the 0xff chunk separator could clash
-    # with a merge (as a pair token or as a minted token)
-    if not merges:
-        return None
-    table = _replace_table(merges)
-    if table is None:
-        return None
-    for ps, c in table:
-        if "\xff" in ps or c == "\xff":
-            return None
-    return table
-
-
-def _split_specials(text, special):
-    # re.split of the escaped tokens alternation (non-empty tokens), no regex
-    parts = []
-    pos = 0
-    while True:
-        best = -1
-        for k in special:
-            i = text.find(k, pos)
-            if i != -1 and (best == -1 or i < best):
-                best, tok = i, k
-        if best == -1:
-            parts.append(text[pos:])
-            return parts
-        parts += text[pos:best], tok
-        pos = best + len(tok)
+from .basic import _ords
 
 
 # the main GPT text split patterns, see
@@ -304,6 +273,7 @@ class RegexTokenizer(Tokenizer):
         merges = self.merges
         state = self.__dict__.get("_enc_state")
         if state is None or state[0] is not merges or state[1] != len(merges):
+            from ._heap import _chunk_table # loaded on first use
             state = (merges, len(merges), self._no_merge_rank(), {},
                      _chunk_table(merges))
             self._enc_state = state
@@ -382,6 +352,7 @@ class RegexTokenizer(Tokenizer):
             special_pattern = "(" + "|".join(re.escape(k) for k in special) + ")"
             special_chunks = re.split(special_pattern, text)
         else:
+            from ._heap import _split_specials # loaded on first use
             special_chunks = _split_specials(text, special)
         # now all the special characters are separated from the rest of the text
         # all chunks of text are encoded separately, then results are joined
