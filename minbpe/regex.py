@@ -77,6 +77,16 @@ class RegexTokenizer(Tokenizer):
 
     def decode(self, ids):
         # given ids (list of integers), return Python string
+        # fast path: one combined lookup table (vocab takes precedence over specials)
+        if self.inverse_special_tokens:
+            table = {k: v.encode("utf-8") for k, v in self.inverse_special_tokens.items()}
+            table.update(self.vocab)
+        else:
+            table = self.vocab
+        try:
+            return b"".join(map(table.__getitem__, ids)).decode("utf-8", errors="replace")
+        except (KeyError, TypeError):
+            pass  # fall through to the checked loop, which raises the proper error
         part_bytes = []
         for idx in ids:
             if idx in self.vocab:
