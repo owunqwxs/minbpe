@@ -41,7 +41,7 @@ class RegexTokenizer(Tokenizer):
         num_merges = vocab_size - 256
 
         # split the text up into text chunks
-        text_chunks = re.findall(self.compiled_pattern, text)
+        text_chunks = self.compiled_pattern.findall(text)
 
         # input text preprocessing: identical chunks always merge identically, so
         # keep each distinct chunk once (in first-seen order) with its multiplicity.
@@ -54,26 +54,24 @@ class RegexTokenizer(Tokenizer):
 
         # count the number of times every consecutive pair appears (once);
         # afterwards the counts are updated incrementally for changed chunks only
+        # where[p]: indices of chunks that contain (or once contained) pair p,
+        # possibly repeated; only those chunks can hold an occurrence of p when
+        # it gets merged (chunk visiting order does not matter: chunks merge
+        # independently, and a repeated or stale visit finds nothing to merge)
         stats = {}
         stats_get = stats.get
+        where = defaultdict(list)
+        k = 0
         for chunk_ids, w in zip(ids, weights):
-            if w == 1:
-                _count_elements(stats, zip(chunk_ids, chunk_ids[1:]))
-            else:
-                for p in zip(chunk_ids, chunk_ids[1:]):
-                    stats[p] = stats_get(p, 0) + w
+            for p in zip(chunk_ids, chunk_ids[1:]):
+                stats[p] = stats_get(p, 0) + w
+                where[p].append(k)
+            k += 1
         stats_values = stats.values()
         # lazy max-heap of (-count, pair): an entry is valid while it matches
         # the current count; every pair whose count changes is pushed again
         heap = [(-c, p) for p, c in stats.items()]
         heapify(heap)
-        # where[p]: indices of chunks that contain (or once contained) pair p;
-        # only those chunks can hold an occurrence of p when it gets merged
-        # (chunk visiting order does not matter: chunks merge independently)
-        where = defaultdict(set)
-        for k, chunk_ids in enumerate(ids):
-            for p in zip(chunk_ids, chunk_ids[1:]):
-                where[p].add(k)
 
         # iteratively merge the most common pairs to create new tokens
         merges = {} # (int, int) -> int
@@ -169,13 +167,13 @@ class RegexTokenizer(Tokenizer):
                         stats[(a, p0)] -= w
                         p = (a, idx)
                         stats[p] = stats_get(p, 0) + w
-                        where[p].add(k)
+                        where[p].append(k)
                         aadd(p)
                     if j + 2 < n_old:
                         stats[(p1, b)] -= w
                         p = (idx, b)
                         stats[p] = stats_get(p, 0) + w
-                        where[p].add(k)
+                        where[p].append(k)
                         aadd(p)
                     continue
                 new = merge(old, pair, idx)
@@ -201,13 +199,13 @@ class RegexTokenizer(Tokenizer):
                             stats[(a, p0)] -= w
                             p = (a, idx)
                             stats[p] = stats_get(p, 0) + w
-                            where[p].add(k)
+                            where[p].append(k)
                             aadd(p)
                     if j + 2 < n_old:
                         stats[(p1, old[j+2])] -= w
                         p = (idx, new[q+1])
                         stats[p] = stats_get(p, 0) + w
-                        where[p].add(k)
+                        where[p].append(k)
                         aadd(p)
             stats[pair] -= fast_total
             for p in added:
