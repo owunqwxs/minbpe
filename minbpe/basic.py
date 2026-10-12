@@ -73,48 +73,48 @@ class BasicTokenizer(Tokenizer):
             p0, p1 = pair
             ps = chr(p0) + chr(p1)
             # occurrences merged by merge(): left to right, non-overlapping
+            # (each found while updating; nxt is the following occurrence)
             find = s.find
-            pos = []
-            pos_app = pos.append
-            j = find(ps)
-            while j >= 0:
-                pos_app(j)
-                j = find(ps, j + 2)
             # update the counts exactly like _slow._update_stats
             n = len(s)
-            k = len(pos)
+            k = 0
             removed = [pair]
             rapp = removed.append
-            added = set()
-            aadd = added.add
+            # new pairs contain idx: none is in stats yet and none is
+            # decremented below, so count them apart and add them at the end
+            added = {}
+            added_get = added.get
             prev_end = -1
-            for m in range(k):
-                j = pos[m]
+            j = find(ps)
+            while j >= 0:
+                e = j + 2
+                nxt = find(ps, e)
+                k += 1
                 if j and j != prev_end:
                     a = ord(s[j-1])
                     p = (a, p0)
                     stats[p] -= 1
                     rapp(p)
                     p = (a, idx)
-                    stats[p] = stats_get(p, 0) + 1
-                    aadd(p)
-                if j + 2 < n:
-                    b = ord(s[j+2])
+                    added[p] = added_get(p, 0) + 1
+                if e < n:
+                    b = ord(s[e])
                     p = (p1, b)
                     stats[p] -= 1
                     rapp(p)
-                    if m + 1 < k and pos[m+1] == j + 2:
+                    if nxt == e:
                         b = idx
                     p = (idx, b)
-                    stats[p] = stats_get(p, 0) + 1
-                    aadd(p)
-                prev_end = j + 2
+                    added[p] = added_get(p, 0) + 1
+                prev_end = e
+                j = nxt
             stats[pair] -= k
             for p in removed:
                 if stats_get(p) == 0:
                     del stats[p]
-            for p in added:
-                heappush(heap, (-stats[p], p))
+            stats.update(added)
+            for p, c in added.items():
+                heappush(heap, (-c, p))
             s = s.replace(ps, chr(idx))
             merges[pair] = idx
             vocab[idx] = vocab[p0] + vocab[p1]

@@ -137,8 +137,10 @@ class RegexTokenizer(Tokenizer):
             p0, p1 = pair
             # pairs whose count went up (all contain idx); a count that drops
             # to 0 stays 0 (new pairs contain idx), so those stay in stats
-            added = set()
-            aadd = added.add
+            # (new pairs contain idx, so none is in stats yet and no decrement
+            # below touches one: count them apart, add them to stats at the end)
+            added = {}
+            added_get = added.get
             # fast-path merges of pair, subtracted from stats[pair] once at the
             # end (no fast-path neighbour pair equals pair: p0 occurs once)
             fast_total = 0
@@ -146,36 +148,34 @@ class RegexTokenizer(Tokenizer):
             for k in where.pop(pair, ()):
                 old = ids[k]
                 c = old.count(p0)
-                if c < 2:
-                    # fast path (most chunks): at most one occurrence of p0,
-                    # so at most one merge; same stats updates, same order
-                    if not c:
-                        continue # stale entry
+                if c == 1:
+                    # fast path (most chunks): one occurrence of p0, so at
+                    # most one merge; same stats updates, same order
                     j = old.index(p0)
+                    e = j + 2
                     n_old = len(old)
-                    if j + 1 == n_old or old[j+1] != p1:
+                    if e > n_old or old[j+1] != p1:
                         continue # stale entry
                     w = weights[k]
                     fast_total += w
-                    if j + 2 < n_old:
-                        b = old[j+2]
-                    # splice in place (ids[k] is private to this chunk)
-                    old[j] = idx
-                    del old[j+1]
                     if j:
                         a = old[j-1]
                         stats[(a, p0)] -= w
                         p = (a, idx)
-                        stats[p] = stats_get(p, 0) + w
+                        added[p] = added_get(p, 0) + w
                         where[p].append(k)
-                        aadd(p)
-                    if j + 2 < n_old:
+                    if e < n_old:
+                        b = old[e]
                         stats[(p1, b)] -= w
                         p = (idx, b)
-                        stats[p] = stats_get(p, 0) + w
+                        added[p] = added_get(p, 0) + w
                         where[p].append(k)
-                        aadd(p)
+                    # splice in place (ids[k] is private to this chunk)
+                    old[j] = idx
+                    del old[j+1]
                     continue
+                if not c:
+                    continue # stale entry
                 new = merge(old, pair, idx)
                 n_old = len(old)
                 m = n_old - len(new) # number of merged occurrences
@@ -198,18 +198,17 @@ class RegexTokenizer(Tokenizer):
                             # accounted for the pair between them)
                             stats[(a, p0)] -= w
                             p = (a, idx)
-                            stats[p] = stats_get(p, 0) + w
+                            added[p] = added_get(p, 0) + w
                             where[p].append(k)
-                            aadd(p)
                     if j + 2 < n_old:
                         stats[(p1, old[j+2])] -= w
                         p = (idx, new[q+1])
-                        stats[p] = stats_get(p, 0) + w
+                        added[p] = added_get(p, 0) + w
                         where[p].append(k)
-                        aadd(p)
             stats[pair] -= fast_total
-            for p in added:
-                heappush(heap, (-stats[p], p))
+            stats.update(added)
+            for p, c in added.items():
+                heappush(heap, (-c, p))
             # save the merge
             merges[pair] = idx
             vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
