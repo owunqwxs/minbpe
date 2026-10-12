@@ -86,17 +86,39 @@ class BasicTokenizer(Tokenizer):
         # given a string text, return the token ids
         text_bytes = text.encode("utf-8") # raw bytes
         ids = list(text_bytes) # list of integers in range 0..255
+        get = self.merges.get
+        inf = float("inf")
+        key = lambda p: get(p, inf)
         while len(ids) >= 2:
-            # find the pair with the lowest merge index
-            stats = get_stats(ids)
-            pair = min(stats, key=lambda p: self.merges.get(p, float("inf")))
-            # subtle: if there are no more merges available, the key will
-            # result in an inf for every single pair, and the min will be
-            # just the first pair in the list, arbitrarily
-            # we can detect this terminating case by a membership check
-            if pair not in self.merges:
+            # find the pair with the lowest merge index (merge ranks are unique,
+            # so the first occurrence of the minimum is the same pair as before)
+            pair = min(zip(ids, ids[1:]), key=key)
+            idx = get(pair)
+            if idx is None:
                 break # nothing else can be merged anymore
             # otherwise let's merge the best pair (lowest merge index)
-            idx = self.merges[pair]
-            ids = merge(ids, pair, idx)
+            ids = merge_fast(ids, pair[0], pair[1], idx)
         return ids
+
+
+def merge_fast(ids, a, b, idx):
+    """Same result as merge(ids, (a, b), idx), using C-level search and slicing."""
+    out = []
+    extend = out.extend
+    append = out.append
+    index = ids.index
+    n = len(ids)
+    i = 0
+    try:
+        while True:
+            j = index(a, i)
+            if j + 1 < n and ids[j + 1] == b:
+                extend(ids[i:j])
+                append(idx)
+                i = j + 2
+            else:
+                extend(ids[i:j + 1])
+                i = j + 1
+    except ValueError:
+        extend(ids[i:])
+    return out
