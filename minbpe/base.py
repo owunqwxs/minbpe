@@ -134,17 +134,19 @@ class Tokenizer:
         # this also means that we couldn't possibly use .vocab in load()
         # because decoding in this way is a lossy operation!
         rendered = {idx: render_token(token) for idx, token in self.vocab.items()}
+        get_children = inverted_merges.get
         lines = []
+        append = lines.append
         for idx, s in rendered.items():
             # find the children of this token, if any
-            if idx in inverted_merges:
+            children = get_children(idx)
+            if children is not None:
                 # if this token has children, render it nicely as a merge
-                idx0, idx1 = inverted_merges[idx]
-                lines.append(f"[{rendered[idx0]}][{rendered[idx1]}] -> [{s}] {idx}\n")
+                append(f"[{rendered[children[0]]}][{rendered[children[1]]}] -> [{s}] {idx}\n")
             else:
                 # otherwise this is leaf token, just print it
                 # (this should just be the first 256 tokens, the bytes)
-                lines.append(f"[{s}] {idx}\n")
+                append(f"[{s}] {idx}\n")
         with open(vocab_file, "w", encoding="utf-8") as f:
             f.write("".join(lines))
 
@@ -167,10 +169,11 @@ class Tokenizer:
                 special, special_idx = f.readline().strip().split()
                 special_tokens[special] = int(special_idx)
             # read the merges
-            for line in f:
-                idx1, idx2 = map(int, line.split())
-                merges[(idx1, idx2)] = idx
-                idx += 1
+            nums = list(map(int, f.read().split()))
+            if len(nums) % 2:
+                raise ValueError("malformed merges in model file")
+            merges = dict(zip(zip(nums[0::2], nums[1::2]),
+                              range(idx, idx + len(nums) // 2)))
         self.merges = merges
         self.special_tokens = special_tokens
         self.vocab = self._build_vocab()
