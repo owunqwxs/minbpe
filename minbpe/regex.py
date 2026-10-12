@@ -93,31 +93,50 @@ class RegexTokenizer(Tokenizer):
         # return the token ids
         # let's begin. first, convert all bytes to integers in range 0..255
         ids = list(text_bytes)
+        merges = self.merges
+        get = merges.get
+        inf = float("inf")
+        key = lambda p: get(p, inf)
         while len(ids) >= 2:
-            # find the pair with the lowest merge index
-            stats = get_stats(ids)
-            pair = min(stats, key=lambda p: self.merges.get(p, float("inf")))
-            # subtle: if there are no more merges available, the key will
-            # result in an inf for every single pair, and the min will be
-            # just the first pair in the list, arbitrarily
-            # we can detect this terminating case by a membership check
-            if pair not in self.merges:
+            # find the pair with the lowest merge index (merge ranks are unique,
+            # so the first occurrence of the minimum is the same pair as before)
+            pair = min(zip(ids, ids[1:]), key=key)
+            idx = get(pair)
+            if idx is None:
                 break # nothing else can be merged anymore
-            # otherwise let's merge the best pair (lowest merge index)
-            idx = self.merges[pair]
-            ids = merge(ids, pair, idx)
+            # merge all occurrences of the best pair, left to right
+            a, b = pair
+            newids = []
+            append = newids.append
+            n = len(ids)
+            i = 0
+            while i < n:
+                x = ids[i]
+                if x == a and i < n - 1 and ids[i + 1] == b:
+                    append(idx)
+                    i += 2
+                else:
+                    append(x)
+                    i += 1
+            ids = newids
         return ids
 
     def encode_ordinary(self, text):
         """Encoding that ignores any special tokens."""
         # split text into chunks of text by categories defined in regex pattern
         text_chunks = re.findall(self.compiled_pattern, text)
-        # all chunks of text are encoded separately, then results are joined
+        # all chunks of text are encoded separately, then results are joined;
+        # identical chunks encode identically, so memoize within this call
         ids = []
+        extend = ids.extend
+        cache = {}
+        encode_chunk = self._encode_chunk
         for chunk in text_chunks:
-            chunk_bytes = chunk.encode("utf-8") # raw bytes
-            chunk_ids = self._encode_chunk(chunk_bytes)
-            ids.extend(chunk_ids)
+            chunk_ids = cache.get(chunk)
+            if chunk_ids is None:
+                chunk_ids = encode_chunk(chunk.encode("utf-8"))
+                cache[chunk] = chunk_ids
+            extend(chunk_ids)
         return ids
 
     def encode(self, text, allowed_special="none_raise"):
