@@ -5,8 +5,6 @@ It would be possible to be a lot more strict about the interface and
 e.g. isolating all regex/pattern parts to the RegexTokenizer, but
 some concessions are made for simplicity.
 """
-from itertools import repeat
-
 try:
     from _collections import _count_elements
 except ImportError: # pragma: no cover - pure python fallback
@@ -79,77 +77,8 @@ def apply_merges(ids, merges, inf=None):
     (an int sentinel keeps all rank comparisons int-int, which are much
     cheaper than int-float ones); defaults to float("inf").
     """
-    if len(ids) < 2:
-        return ids
-    if len(ids) >= 256:
-        # long sequences: avoid the O(len) min/index/count scans per merge round
-        from ._heap import _apply_merges_heap # loaded on first use
-        return _apply_merges_heap(ids, merges)
-    merges_get = merges.get
-    if inf is None:
-        inf = float("inf")
-    ranks = list(map(merges_get, zip(ids, ids[1:]), repeat(inf)))
-    ids = list(ids) # private copy: the single-occurrence path edits it in place
-    while ranks:
-        idx = min(ranks)
-        if idx == inf:
-            break # nothing else can be merged anymore
-        j = ranks.index(idx)
-        # positions with rank idx left to visit (all pair occurrences are among them)
-        k = ranks.count(idx)
-        if k == 1:
-            # the common case: a single occurrence, splice it in place and
-            # recompute only the (at most two) neighbouring ranks
-            ids[j] = idx
-            del ids[j+1]
-            del ranks[j]
-            if j:
-                ranks[j-1] = merges_get((ids[j-1], idx), inf)
-            if j < len(ranks):
-                ranks[j] = merges_get((idx, ids[j+1]), inf)
-            continue
-        p0 = ids[j]
-        p1 = ids[j+1]
-        last = len(ranks) - 1 # last pair position
-        newids = []
-        ext = newids.extend
-        app = newids.append
-        newranks = []
-        rext = newranks.extend
-        rapp = newranks.append
-        index = ranks.index
-        s = 0 # start of the not yet copied part of ids / ranks
-        first = True
-        while True:
-            k -= 1
-            if ids[j] == p0 and ids[j+1] == p1:
-                # merge the occurrence at j (same left-to-right order as merge())
-                if s < j:
-                    if not first:
-                        rapp(merges_get((idx, ids[s]), inf))
-                    rext(ranks[s:j-1])
-                    rapp(merges_get((ids[j-1], idx), inf))
-                    ext(ids[s:j])
-                elif not first:
-                    rapp(merges_get((idx, idx), inf))
-                app(idx)
-                first = False
-                s = j + 2
-                if j < last and ranks[j+1] == idx:
-                    k -= 1 # overlapping position j+1 is skipped
-                start = s
-            else:
-                start = j + 1
-            if not k:
-                break
-            j = index(idx, start)
-        if s <= last + 1:
-            rapp(merges_get((idx, ids[s]), inf))
-            rext(ranks[s:])
-            ext(ids[s:])
-        ids = newids
-        ranks = newranks
-    return ids
+    from ._heap import apply_merges # loaded on first use (encoding only)
+    return apply_merges(ids, merges, inf)
 
 def pop_top_pairs(heap, stats_get, heappush, heappop):
     """
@@ -260,28 +189,9 @@ class Tokenizer:
             # the merges dict
             for idx1, idx2 in self.merges:
                 f.write(f"{idx1} {idx2}\n")
-        # write the vocab: for the human to look at
-        vocab_file = file_prefix + ".vocab"
-        inverted_merges = {idx: pair for pair, idx in self.merges.items()}
-        with open(vocab_file, "w", encoding="utf-8") as f:
-            for idx, token in self.vocab.items():
-                # note: many tokens may be partial utf-8 sequences
-                # and cannot be decoded into valid strings. Here we're using
-                # errors='replace' to replace them with the replacement char �.
-                # this also means that we couldn't possibly use .vocab in load()
-                # because decoding in this way is a lossy operation!
-                s = render_token(token)
-                # find the children of this token, if any
-                if idx in inverted_merges:
-                    # if this token has children, render it nicely as a merge
-                    idx0, idx1 = inverted_merges[idx]
-                    s0 = render_token(self.vocab[idx0])
-                    s1 = render_token(self.vocab[idx1])
-                    f.write(f"[{s0}][{s1}] -> [{s}] {idx}\n")
-                else:
-                    # otherwise this is leaf token, just print it
-                    # (this should just be the first 256 tokens, the bytes)
-                    f.write(f"[{s}] {idx}\n")
+        # write the vocab: for the human to look at (loaded on first use)
+        from ._heap import _save_vocab
+        _save_vocab(self, file_prefix + ".vocab")
 
     def load(self, model_file):
         """Inverse of save() but only for the model file"""

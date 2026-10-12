@@ -1,6 +1,93 @@
 """Encoding-only helpers, loaded on first use (off the package import path)."""
 from heapq import heapify, heappop, heappush
+from itertools import repeat
 from .basic import _replace_table
+from .base import render_token
+
+
+def _save_vocab(self, vocab_file):
+    # the human-readable .vocab file of Tokenizer.save (lossy: errors='replace')
+    inverted_merges = {idx: pair for pair, idx in self.merges.items()}
+    with open(vocab_file, "w", encoding="utf-8") as f:
+        for idx, token in self.vocab.items():
+            s = render_token(token)
+            if idx in inverted_merges:
+                idx0, idx1 = inverted_merges[idx]
+                s0 = render_token(self.vocab[idx0])
+                s1 = render_token(self.vocab[idx1])
+                f.write(f"[{s0}][{s1}] -> [{s}] {idx}\n")
+            else:
+                f.write(f"[{s}] {idx}\n")
+
+
+def apply_merges(ids, merges, inf=None):
+    # see base.apply_merges (same function, kept off the import path)
+    if len(ids) < 2:
+        return ids
+    if len(ids) >= 256:
+        return _apply_merges_heap(ids, merges)
+    merges_get = merges.get
+    if inf is None:
+        inf = float("inf")
+    ranks = list(map(merges_get, zip(ids, ids[1:]), repeat(inf)))
+    ids = list(ids) # private copy: the single-occurrence path edits it in place
+    while ranks:
+        idx = min(ranks)
+        if idx == inf:
+            break # nothing else can be merged anymore
+        j = ranks.index(idx)
+        k = ranks.count(idx)
+        if k == 1:
+            ids[j] = idx
+            del ids[j+1]
+            del ranks[j]
+            if j:
+                ranks[j-1] = merges_get((ids[j-1], idx), inf)
+            if j < len(ranks):
+                ranks[j] = merges_get((idx, ids[j+1]), inf)
+            continue
+        p0 = ids[j]
+        p1 = ids[j+1]
+        last = len(ranks) - 1 # last pair position
+        newids = []
+        ext = newids.extend
+        app = newids.append
+        newranks = []
+        rext = newranks.extend
+        rapp = newranks.append
+        index = ranks.index
+        s = 0 # start of the not yet copied part of ids / ranks
+        first = True
+        while True:
+            k -= 1
+            if ids[j] == p0 and ids[j+1] == p1:
+                # merge the occurrence at j (same left-to-right order as merge())
+                if s < j:
+                    if not first:
+                        rapp(merges_get((idx, ids[s]), inf))
+                    rext(ranks[s:j-1])
+                    rapp(merges_get((ids[j-1], idx), inf))
+                    ext(ids[s:j])
+                elif not first:
+                    rapp(merges_get((idx, idx), inf))
+                app(idx)
+                first = False
+                s = j + 2
+                if j < last and ranks[j+1] == idx:
+                    k -= 1 # overlapping position j+1 is skipped
+                start = s
+            else:
+                start = j + 1
+            if not k:
+                break
+            j = index(idx, start)
+        if s <= last + 1:
+            rapp(merges_get((idx, ids[s]), inf))
+            rext(ranks[s:])
+            ext(ids[s:])
+        ids = newids
+        ranks = newranks
+    return ids
 
 
 def _chunk_table(merges):
