@@ -1,8 +1,6 @@
 """Encoding-only helpers, loaded on first use (off the package import path)."""
-from heapq import heapify, heappop, heappush
 from itertools import repeat
 import sys
-from .base import render_token
 
 _UTF32 = "utf-32-le" if sys.byteorder == "little" else "utf-32-be"
 
@@ -78,21 +76,6 @@ def regex_encode(self, text, allowed_special):
         elif part:
             ids.extend(self._encode_ordinary(part, cache, inf))
     return ids
-
-
-def _save_vocab(self, vocab_file):
-    # the human-readable .vocab file of Tokenizer.save (lossy: errors='replace')
-    inverted_merges = {idx: pair for pair, idx in self.merges.items()}
-    with open(vocab_file, "w", encoding="utf-8") as f:
-        for idx, token in self.vocab.items():
-            s = render_token(token)
-            if idx in inverted_merges:
-                idx0, idx1 = inverted_merges[idx]
-                s0 = render_token(self.vocab[idx0])
-                s1 = render_token(self.vocab[idx1])
-                f.write(f"[{s0}][{s1}] -> [{s}] {idx}\n")
-            else:
-                f.write(f"[{s}] {idx}\n")
 
 
 def apply_merges(ids, merges, inf=None):
@@ -197,62 +180,6 @@ def _split_specials(text, special):
 
 
 def _apply_merges_heap(ids, merges):
-    """
-    Same result as base.apply_merges, for long sequences: a doubly linked list
-    over the positions plus a lazily validated heap of (rank, position); each
-    round merges the minimal rank's first pair left to right, like merge().
-    """
-    merges_get = merges.get
-    n = len(ids)
-    val = list(ids)
-    nxt = list(range(1, n + 1)) # n means "no next"
-    prv = list(range(-1, n - 1)) # -1 means "no previous"
-    heap = [(r, i) for i, r in enumerate(map(merges_get, zip(val, val[1:])))
-            if r is not None]
-    heapify(heap)
-    while heap:
-        r = heap[0][0]
-        pair = None
-        last = -1
-        merged = []
-        rest = []
-        while heap and heap[0][0] == r:
-            p = heappop(heap)[1]
-            if p == last:
-                continue # duplicate entry (pops come out in position order)
-            last = p
-            v = val[p]
-            if v is None:
-                continue # position was merged away
-            q = nxt[p]
-            if q == n:
-                continue
-            pr = (v, val[q])
-            if merges_get(pr) != r:
-                continue # stale entry
-            if pair is None:
-                pair = pr
-            elif pr != pair:
-                rest.append(p) # another pair with the same rank: later round
-                continue
-            val[p] = r
-            val[q] = None
-            q2 = nxt[q]
-            nxt[p] = q2
-            if q2 < n:
-                prv[q2] = p
-            merged.append(p)
-        for p in rest:
-            heappush(heap, (r, p))
-        for p in merged:
-            a = prv[p]
-            if a >= 0:
-                rk = merges_get((val[a], r))
-                if rk is not None:
-                    heappush(heap, (rk, a))
-            b = nxt[p]
-            if b < n:
-                rk = merges_get((r, val[b]))
-                if rk is not None:
-                    heappush(heap, (rk, p))
-    return [v for v in val if v is not None]
+    # long sequences (loaded on first use), see _slow.apply_merges_heap
+    from ._slow import apply_merges_heap
+    return apply_merges_heap(ids, merges)

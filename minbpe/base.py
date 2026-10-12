@@ -116,18 +116,9 @@ def pop_top_pairs(heap, stats_get, heappush, heappop):
 
 # first two helper functions...
 def replace_control_characters(s: str) -> str:
-    # we don't want to print control characters
-    # which distort the output (e.g. \n or much worse)
-    # https://stackoverflow.com/questions/4324790/removing-control-characters-from-a-string-in-python/19016117#19016117
-    # http://www.unicode.org/reports/tr44/#GC_Values_Table
-    import unicodedata # only needed for pretty printing, keep it off the import path
-    chars = []
-    for ch in s:
-        if unicodedata.category(ch)[0] != "C":
-            chars.append(ch) # this character is ok
-        else:
-            chars.append(f"\\u{ord(ch):04x}") # escape
-    return "".join(chars)
+    # we don't want to print control characters (pretty printing only)
+    from ._slow import replace_control_characters as f # loaded on first use
+    return f(s)
 
 def render_token(t: bytes) -> str:
     # pretty print a token, escaping control characters
@@ -190,8 +181,8 @@ class Tokenizer:
             for idx1, idx2 in self.merges:
                 f.write(f"{idx1} {idx2}\n")
         # write the vocab: for the human to look at (loaded on first use)
-        from ._heap import _save_vocab
-        _save_vocab(self, file_prefix + ".vocab")
+        from ._slow import save_vocab
+        save_vocab(self, file_prefix + ".vocab")
 
     def load(self, model_file):
         """Inverse of save() but only for the model file"""
@@ -212,10 +203,8 @@ class Tokenizer:
                 special, special_idx = f.readline().strip().split()
                 special_tokens[special] = int(special_idx)
             # read the merges
-            for line in f:
-                idx1, idx2 = map(int, line.split())
-                merges[(idx1, idx2)] = idx
-                idx += 1
+            pairs = [(int(a), int(b)) for a, b in map(str.split, f)]
+            merges = dict(zip(pairs, range(idx, idx + len(pairs))))
         self.merges = merges
         self.special_tokens = special_tokens
         self.vocab = self._build_vocab()
