@@ -57,6 +57,9 @@ def replace_control_characters(s: str) -> str:
 def render_token(t: bytes) -> str:
     # pretty print a token, escaping control characters
     s = t.decode('utf-8', errors='replace')
+    # fast path: printable strings contain no category "C" characters
+    if s.isprintable():
+        return s
     s = replace_control_characters(s)
     return s
 
@@ -112,30 +115,29 @@ class Tokenizer:
             for special, idx in self.special_tokens.items():
                 f.write(f"{special} {idx}\n")
             # the merges dict
-            for idx1, idx2 in self.merges:
-                f.write(f"{idx1} {idx2}\n")
+            f.write("".join([f"{idx1} {idx2}\n" for idx1, idx2 in self.merges]))
         # write the vocab: for the human to look at
         vocab_file = file_prefix + ".vocab"
         inverted_merges = {idx: pair for pair, idx in self.merges.items()}
+        # note: many tokens may be partial utf-8 sequences
+        # and cannot be decoded into valid strings. Here we're using
+        # errors='replace' to replace them with the replacement char �.
+        # this also means that we couldn't possibly use .vocab in load()
+        # because decoding in this way is a lossy operation!
+        rendered = {idx: render_token(token) for idx, token in self.vocab.items()}
+        lines = []
+        for idx, s in rendered.items():
+            # find the children of this token, if any
+            if idx in inverted_merges:
+                # if this token has children, render it nicely as a merge
+                idx0, idx1 = inverted_merges[idx]
+                lines.append(f"[{rendered[idx0]}][{rendered[idx1]}] -> [{s}] {idx}\n")
+            else:
+                # otherwise this is leaf token, just print it
+                # (this should just be the first 256 tokens, the bytes)
+                lines.append(f"[{s}] {idx}\n")
         with open(vocab_file, "w", encoding="utf-8") as f:
-            for idx, token in self.vocab.items():
-                # note: many tokens may be partial utf-8 sequences
-                # and cannot be decoded into valid strings. Here we're using
-                # errors='replace' to replace them with the replacement char �.
-                # this also means that we couldn't possibly use .vocab in load()
-                # because decoding in this way is a lossy operation!
-                s = render_token(token)
-                # find the children of this token, if any
-                if idx in inverted_merges:
-                    # if this token has children, render it nicely as a merge
-                    idx0, idx1 = inverted_merges[idx]
-                    s0 = render_token(self.vocab[idx0])
-                    s1 = render_token(self.vocab[idx1])
-                    f.write(f"[{s0}][{s1}] -> [{s}] {idx}\n")
-                else:
-                    # otherwise this is leaf token, just print it
-                    # (this should just be the first 256 tokens, the bytes)
-                    f.write(f"[{s}] {idx}\n")
+            f.write("".join(lines))
 
     def load(self, model_file):
         """Inverse of save() but only for the model file"""
