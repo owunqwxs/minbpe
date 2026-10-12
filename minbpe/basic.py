@@ -9,7 +9,34 @@ But:
 - Does not handle any special tokens.
 """
 
+from collections import Counter
+
 from .base import Tokenizer, get_stats, merge
+
+
+def _merge_fast(ids, pair, idx):
+    # same result as base.merge (greedy left-to-right), but jumps between
+    # occurrences of pair[0] with list.index and copies runs with slices
+    a, b = pair
+    n = len(ids)
+    out = []
+    extend = out.extend
+    append = out.append
+    find = ids.index
+    i = 0
+    while True:
+        try:
+            j = find(a, i)
+        except ValueError:
+            extend(ids[i:])
+            return out
+        if j + 1 < n and ids[j + 1] == b:
+            extend(ids[i:j])
+            append(idx)
+            i = j + 2
+        else:
+            extend(ids[i:j + 1])
+            i = j + 1
 
 
 class BasicTokenizer(Tokenizer):
@@ -30,13 +57,14 @@ class BasicTokenizer(Tokenizer):
         vocab = {idx: bytes([idx]) for idx in range(256)} # int -> bytes
         for i in range(num_merges):
             # count up the number of times every consecutive pair appears
-            stats = get_stats(ids)
+            # (Counter keeps first-occurrence order, same as get_stats)
+            stats = Counter(zip(ids, ids[1:]))
             # find the pair with the highest count
             pair = max(stats, key=stats.get)
             # mint a new token: assign it the next available id
             idx = 256 + i
             # replace all occurrences of pair in ids with idx
-            ids = merge(ids, pair, idx)
+            ids = _merge_fast(ids, pair, idx)
             # save the merge
             merges[pair] = idx
             vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
