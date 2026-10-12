@@ -57,30 +57,49 @@ class RegexTokenizer(Tokenizer):
         # iteratively merge the most common pairs to create new tokens
         merges = {} # (int, int) -> int
         vocab = {idx: bytes([idx]) for idx in range(256)} # idx -> bytes
+        # count the number of times every consecutive pair appears; the counts
+        # are then maintained incrementally (zero counts are removed)
+        stats = {}
+        get = stats.get
+        for chunk_ids, w in zip(ids, counts):
+            for p in zip(chunk_ids, chunk_ids[1:]):
+                stats[p] = get(p, 0) + w
         for i in range(num_merges):
-            # count the number of times every consecutive pair appears
-            stats = {}
-            get = stats.get
-            for chunk_ids, w in zip(ids, counts):
-                for p in zip(chunk_ids, chunk_ids[1:]):
-                    stats[p] = get(p, 0) + w
-            # find the pair with the highest count
-            pair = max(stats, key=stats.get)
+            # find the pair with the highest count; ties go to the pair that
+            # occurs first when scanning the chunks in order (this is exactly
+            # the insertion order of a freshly recounted stats dict)
+            best = max(stats.values())
+            cands = [p for p, c in stats.items() if c == best]
+            if len(cands) == 1:
+                pair = cands[0]
+            else:
+                cs = set(cands)
+                pair = None
+                for chunk_ids in ids:
+                    for p in zip(chunk_ids, chunk_ids[1:]):
+                        if p in cs:
+                            pair = p
+                            break
+                    if pair is not None:
+                        break
             # mint a new token: assign it the next available id
             idx = 256 + i
             # replace all occurrences of pair in ids with idx
-            a, b = pair
-            new_ids = []
-            new_counts = []
-            for chunk_ids, w in zip(ids, counts):
+            a = pair[0]
+            for j, chunk_ids in enumerate(ids):
                 if a in chunk_ids:
-                    chunk_ids = merge(chunk_ids, pair, idx)
-                    if len(chunk_ids) < 2:
-                        continue
-                new_ids.append(chunk_ids)
-                new_counts.append(w)
-            ids = new_ids
-            counts = new_counts
+                    new = merge(chunk_ids, pair, idx)
+                    if len(new) != len(chunk_ids):
+                        w = counts[j]
+                        for p in zip(chunk_ids, chunk_ids[1:]):
+                            c = stats[p] - w
+                            if c:
+                                stats[p] = c
+                            else:
+                                del stats[p]
+                        for p in zip(new, new[1:]):
+                            stats[p] = get(p, 0) + w
+                        ids[j] = new
             # save the merge
             merges[pair] = idx
             vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
