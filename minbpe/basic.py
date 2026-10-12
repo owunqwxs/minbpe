@@ -9,6 +9,7 @@ But:
 - Does not handle any special tokens.
 """
 
+import sys
 from heapq import heapify, heappop, heappush
 
 from .base import Tokenizer, get_stats, merge, apply_merges, pop_top_pairs
@@ -211,8 +212,16 @@ class BasicTokenizer(Tokenizer):
                 s = text_bytes.decode("latin-1")
                 for ps, c in table:
                     s = s.replace(ps, c)
-                return list(map(ord, s))
+                return _ords(s)
         return apply_merges(ids, merges, max(merges.values(), default=0) + 1)
+
+
+_UTF32 = "utf-32-le" if sys.byteorder == "little" else "utf-32-be"
+
+
+def _ords(s):
+    # list(map(ord, s)), done in C (the code points as native uint32)
+    return memoryview(s.encode(_UTF32, "surrogatepass")).cast("I").tolist()
 
 
 def _replace_table(merges):

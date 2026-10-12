@@ -15,7 +15,7 @@ from heapq import heapify, heappop, heappush
 import regex as re
 from itertools import chain
 from .base import Tokenizer, merge, apply_merges, _count_elements
-from .basic import _replace_table
+from .basic import _replace_table, _ords
 
 
 def _chunk_table(merges):
@@ -328,12 +328,13 @@ class RegexTokenizer(Tokenizer):
                 s = b"\xff".join(map(str.encode, new)).decode("latin-1")
                 for ps, c in table:
                     s = s.replace(ps, c)
-                cache.update(zip(new, [list(map(ord, p)) for p in s.split("\xff")]))
+                # with a table, cached ids are kept as str of chr(id)
+                cache.update(zip(new, s.split("\xff")))
             elif new:
                 encode_chunk = self._encode_chunk
                 for chunk in new:
-                    cache[chunk] = encode_chunk(chunk.encode("utf-8"), inf)
-            return list(chain.from_iterable(map(cache.__getitem__, text_chunks)))
+                    cache[chunk] = "".join(map(chr, encode_chunk(chunk.encode("utf-8"), inf)))
+            return _ords("".join(map(cache.__getitem__, text_chunks)))
         # all chunks of text are encoded separately, then results are joined
         ids = []
         # chunks repeat a lot in natural text (" the", ","): encode each distinct
