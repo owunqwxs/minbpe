@@ -13,7 +13,6 @@ from collections import defaultdict
 from heapq import heapify, heappop, heappush
 
 import regex as re
-from itertools import chain
 from .base import Tokenizer, merge, apply_merges, _count_elements
 from .basic import _ords
 
@@ -234,17 +233,8 @@ class RegexTokenizer(Tokenizer):
 
     def decode(self, ids):
         # given ids (list of integers), return Python string
-        part_bytes = []
-        for idx in ids:
-            if idx in self.vocab:
-                part_bytes.append(self.vocab[idx])
-            elif idx in self.inverse_special_tokens:
-                part_bytes.append(self.inverse_special_tokens[idx].encode("utf-8"))
-            else:
-                raise ValueError(f"invalid token id: {idx}")
-        text_bytes = b"".join(part_bytes)
-        text = text_bytes.decode("utf-8", errors="replace")
-        return text
+        from ._slow import regex_decode # loaded on first use
+        return regex_decode(self, ids)
 
     def _encode_chunk(self, text_bytes, inf=None):
         # return the token ids
@@ -305,19 +295,9 @@ class RegexTokenizer(Tokenizer):
                 for chunk in new:
                     cache[chunk] = "".join(map(chr, encode_chunk(chunk.encode("utf-8"), inf)))
             return _ords("".join(map(cache.__getitem__, text_chunks)))
-        # all chunks of text are encoded separately, then results are joined
-        ids = []
-        # chunks repeat a lot in natural text (" the", ","): encode each distinct
-        # chunk once per call (cache: chunk -> ids, shared by the caller)
-        cache_get = cache.get
-        encode_chunk = self._encode_chunk
-        for chunk in text_chunks:
-            chunk_ids = cache_get(chunk)
-            if chunk_ids is None:
-                chunk_bytes = chunk.encode("utf-8") # raw bytes
-                chunk_ids = cache[chunk] = encode_chunk(chunk_bytes, inf)
-            ids.extend(chunk_ids)
-        return ids
+        # each distinct chunk encoded once (loaded on first use)
+        from ._slow import encode_plain
+        return encode_plain(self, text_chunks, cache, inf)
 
     def encode(self, text, allowed_special="none_raise"):
         """
