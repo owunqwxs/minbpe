@@ -46,13 +46,22 @@ def replace_control_characters(s: str) -> str:
     # which distort the output (e.g. \n or much worse)
     # https://stackoverflow.com/questions/4324790/removing-control-characters-from-a-string-in-python/19016117#19016117
     # http://www.unicode.org/reports/tr44/#GC_Values_Table
-    chars = []
-    for ch in s:
+    # each code point maps to itself (ok) or its \uXXXX escape (category "C");
+    # the per-code-point result is computed once and memoized in _ESCAPES
+    return s.translate(_ESCAPES)
+
+class _EscapeTable(dict):
+    """code point -> rendered string, filled lazily (pure function of the code point)"""
+    def __missing__(self, o):
+        ch = chr(o)
         if unicodedata.category(ch)[0] != "C":
-            chars.append(ch) # this character is ok
+            r = ch # this character is ok
         else:
-            chars.append(f"\\u{ord(ch):04x}") # escape
-    return "".join(chars)
+            r = f"\\u{o:04x}" # escape
+        self[o] = r
+        return r
+
+_ESCAPES = _EscapeTable()
 
 def render_token(t: bytes) -> str:
     # pretty print a token, escaping control characters
