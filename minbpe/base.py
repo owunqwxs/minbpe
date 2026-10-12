@@ -98,8 +98,8 @@ def pop_top_pairs(heap, stats_get, heappush, heappop):
         if c == -neg:
             break
         heappop(heap)
-        if c is not None and c < -neg:
-            heappush(heap, (-c, p)) # count went down: re-file it
+        if c and c < -neg:
+            heappush(heap, (-c, p)) # count went down: re-file it (not 0)
     top = -neg
     cands = []
     while heap and heap[0][0] == neg:
@@ -108,7 +108,7 @@ def pop_top_pairs(heap, stats_get, heappush, heappop):
         if c == top:
             if p not in cands:
                 cands.append(p)
-        elif c is not None and c < top:
+        elif c and c < top:
             heappush(heap, (-c, p))
     for p in cands:
         heappush(heap, (neg, p))
@@ -172,25 +172,5 @@ class Tokenizer:
 
     def load(self, model_file):
         """Inverse of save() but only for the model file"""
-        assert model_file.endswith(".model")
-        # read the model file
-        merges = {}
-        special_tokens = {}
-        idx = 256
-        with open(model_file, 'r', encoding="utf-8") as f:
-            # read the version
-            version = f.readline().strip()
-            assert version == "minbpe v1"
-            # read the pattern
-            self.pattern = f.readline().strip()
-            # read the special tokens
-            num_special = int(f.readline().strip())
-            for _ in range(num_special):
-                special, special_idx = f.readline().strip().split()
-                special_tokens[special] = int(special_idx)
-            # read the merges
-            pairs = [(int(a), int(b)) for a, b in map(str.split, f)]
-            merges = dict(zip(pairs, range(idx, idx + len(pairs))))
-        self.merges = merges
-        self.special_tokens = special_tokens
-        self.vocab = self._build_vocab()
+        from ._heap import load # loaded on first use (with encoding)
+        load(self, model_file)

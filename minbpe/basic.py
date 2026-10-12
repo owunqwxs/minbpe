@@ -11,7 +11,12 @@ But:
 
 from heapq import heapify, heappop, heappush
 
-from .base import Tokenizer, get_stats, apply_merges, pop_top_pairs
+from operator import itemgetter
+
+from .base import Tokenizer, get_stats, pop_top_pairs, _count_elements
+
+_last = itemgetter(-1)
+_first = itemgetter(0)
 
 
 class BasicTokenizer(Tokenizer):
@@ -72,50 +77,47 @@ class BasicTokenizer(Tokenizer):
             idx = 256 + i
             p0, p1 = pair
             ps = chr(p0) + chr(p1)
-            # occurrences merged by merge(): left to right, non-overlapping
-            # (each found while updating; nxt is the following occurrence)
-            find = s.find
-            # update the counts exactly like _slow._update_stats
-            n = len(s)
-            k = 0
+            # merge() semantics (left to right, non-overlapping) == str.replace;
+            # chr(idx) is new, so splitting on it gives the text between merged
+            # occurrences: a piece's last char is the left neighbour of the
+            # next occurrence, its first char the right neighbour of the
+            # previous one, and an empty inner piece means two adjacent
+            # occurrences (pair (idx, idx), old (p1, p0), no left update)
+            x = chr(idx)
+            s = s.replace(ps, x)
+            parts = s.split(x)
+            # update the counts exactly like _slow._update_stats; new pairs
+            # contain idx, so none is in stats yet: add them at the end
+            left = {}
+            _count_elements(left, map(_last, filter(None, parts[:-1])))
+            right = {}
+            _count_elements(right, map(_first, filter(None, parts[1:])))
+            stats[pair] -= len(parts) - 1
             removed = [pair]
-            rapp = removed.append
-            # new pairs contain idx: none is in stats yet and none is
-            # decremented below, so count them apart and add them at the end
             added = {}
-            added_get = added.get
-            prev_end = -1
-            j = find(ps)
-            while j >= 0:
-                e = j + 2
-                nxt = find(ps, e)
-                k += 1
-                if j and j != prev_end:
-                    a = ord(s[j-1])
-                    p = (a, p0)
-                    stats[p] -= 1
-                    rapp(p)
-                    p = (a, idx)
-                    added[p] = added_get(p, 0) + 1
-                if e < n:
-                    b = ord(s[e])
-                    p = (p1, b)
-                    stats[p] -= 1
-                    rapp(p)
-                    if nxt == e:
-                        b = idx
-                    p = (idx, b)
-                    added[p] = added_get(p, 0) + 1
-                prev_end = e
-                j = nxt
-            stats[pair] -= k
+            for a, c in left.items():
+                a = ord(a)
+                p = (a, p0)
+                stats[p] -= c
+                removed.append(p)
+                added[(a, idx)] = c
+            for b, c in right.items():
+                b = ord(b)
+                p = (p1, b)
+                stats[p] -= c
+                removed.append(p)
+                added[(idx, b)] = c
+            c = parts[1:-1].count("")
+            if c:
+                stats[(p1, p0)] -= c
+                removed.append((p1, p0))
+                added[(idx, idx)] = c
             for p in removed:
                 if stats_get(p) == 0:
                     del stats[p]
             stats.update(added)
             for p, c in added.items():
                 heappush(heap, (-c, p))
-            s = s.replace(ps, chr(idx))
             merges[pair] = idx
             vocab[idx] = vocab[p0] + vocab[p1]
             if verbose:

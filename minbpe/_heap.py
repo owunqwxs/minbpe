@@ -5,6 +5,31 @@ import sys
 _UTF32 = "utf-32-le" if sys.byteorder == "little" else "utf-32-be"
 
 
+def load(self, model_file):
+    # body of Tokenizer.load: inverse of save() but only for the model file
+    assert model_file.endswith(".model")
+    merges = {}
+    special_tokens = {}
+    idx = 256
+    with open(model_file, 'r', encoding="utf-8") as f:
+        # read the version
+        version = f.readline().strip()
+        assert version == "minbpe v1"
+        # read the pattern
+        self.pattern = f.readline().strip()
+        # read the special tokens
+        num_special = int(f.readline().strip())
+        for _ in range(num_special):
+            special, special_idx = f.readline().strip().split()
+            special_tokens[special] = int(special_idx)
+        # read the merges
+        pairs = [(int(a), int(b)) for a, b in map(str.split, f)]
+        merges = dict(zip(pairs, range(idx, idx + len(pairs))))
+    self.merges = merges
+    self.special_tokens = special_tokens
+    self.vocab = self._build_vocab()
+
+
 def _ords(s):
     # list(map(ord, s)), done in C (the code points as native uint32)
     return memoryview(s.encode(_UTF32, "surrogatepass")).cast("I").tolist()

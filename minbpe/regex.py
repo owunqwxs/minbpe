@@ -13,7 +13,7 @@ from collections import defaultdict
 from heapq import heapify, heappop, heappush
 
 import regex as re
-from .base import Tokenizer, merge, apply_merges, _count_elements
+from .base import Tokenizer, merge, apply_merges, _count_elements, pop_top_pairs
 
 
 # the main GPT text split patterns, see
@@ -67,7 +67,6 @@ class RegexTokenizer(Tokenizer):
                 stats[p] = stats_get(p, 0) + w
                 where[p].append(k)
             k += 1
-        stats_values = stats.values()
         # lazy max-heap of (-count, pair): an entry is valid while it matches
         # the current count; every pair whose count changes is pushed again
         heap = [(-c, p) for p, c in stats.items()]
@@ -81,35 +80,13 @@ class RegexTokenizer(Tokenizer):
             # first occurrence (chunk order, then position) is earliest, which
             # is what max() over a freshly recounted dict would pick
             # (the tie-break does not depend on dict order, so the top pairs
-            # come from the heap: drop stale entries, then pop all valid ties)
-            # (only count increases push an entry; an entry whose count went
-            # down is re-filed with its current count when it surfaces)
-            while heap:
-                c, pair = heap[0]
-                cur = stats_get(pair)
-                if cur == -c:
-                    break
-                heappop(heap)
-                if cur and cur < -c:
-                    heappush(heap, (-cur, pair))
-            else:
-                # no positive count left: same error as before
-                max(filter(None, stats_values))
-            top = -c
-            heappop(heap)
-            tied = None
-            while heap and heap[0][0] == c:
-                q = heappop(heap)[1]
-                cur = stats_get(q)
-                if cur == top:
-                    if tied is None:
-                        tied = {pair}
-                    tied.add(q)
-                elif cur and cur < top:
-                    heappush(heap, (-cur, q))
-            if tied is not None and len(tied) > 1:
-                for q in tied:
-                    heappush(heap, (c, q))
+            # come from the lazy heap; a merged pair's count drops to 0)
+            try:
+                top, tied = pop_top_pairs(heap, stats_get, heappush, heappop)
+            except ValueError:
+                max(()) # no positive count left: max()'s own error
+            pair = tied[0]
+            if len(tied) > 1:
                 # earliest occurrence (chunk, position) among the tied pairs:
                 # where[p] holds every chunk that contains p (plus stale ones),
                 # so visit those in chunk order and stop once past the best
